@@ -1,14 +1,17 @@
 @import "tailwindcss";
 
 :root {
-  --background: #FDFBF7;
-  --foreground: #2C2A29;
-  --card-bg: #F7F3EC;
-  --card-border: #E6DED2;
-  --ink-faded: #6E655F;
-  --accent-sage: #5A7836;
-  --accent-gold: #C28B2C;
-  --accent-moon: #384260;
+  --background: #13151A;
+  --foreground: #EAE6DF;
+  --card-bg: #1B1E26;
+  --card-border: #2B303C;
+  --ink-faded: #9D978C;
+  --accent-sage: #86A868;
+  --accent-gold: #E5B458;
+  --accent-moon: #6275A4;
+  --accent-wood: #B3835B;
+  --doodle-ink: #A8A092;
+  --doodle-glow: rgba(229, 180, 88, 0.15);
 }
 
 @theme inline {
@@ -20,11 +23,115 @@
   --color-sage: var(--accent-sage);
   --color-gold: var(--accent-gold);
   --color-moon: var(--accent-moon);
+  --color-wood: var(--accent-wood);
+  --color-doodle: var(--doodle-ink);
+  --font-serif: var(--font-lora-serif), Georgia, serif;
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-doodle: var(--font-caveat-hand), cursive;
 }
 
 body {
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-sans);
   min-height: 100vh;
+}
+
+/* Subtle hand-drawn and atmospheric keyframe animations */
+@keyframes gentle-sway {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(2deg);
+  }
+}
+
+@keyframes curtain-breeze {
+  0%, 100% {
+    transform: skewX(0deg) scaleX(1);
+  }
+  50% {
+    transform: skewX(-1.5deg) scaleX(1.02);
+  }
+}
+
+@keyframes lamp-pulse {
+  0%, 100% {
+    opacity: 0.85;
+    filter: drop-shadow(0 0 8px rgba(245, 200, 98, 0.35));
+  }
+  50% {
+    opacity: 1;
+    filter: drop-shadow(0 0 14px rgba(245, 200, 98, 0.6));
+  }
+}
+
+@keyframes star-twinkle {
+  0%, 100% {
+    opacity: 0.35;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 0.95;
+    transform: scale(1.15);
+  }
+}
+
+@keyframes sparkle-pulse {
+  0%, 100% {
+    opacity: 0.2;
+    transform: scale(0.85) rotate(0deg);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(1.1) rotate(6deg);
+  }
+}
+
+@keyframes float-dust {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+.animate-sway {
+  animation: gentle-sway 6.5s ease-in-out infinite;
+  transform-origin: bottom center;
+}
+
+.animate-breeze {
+  animation: curtain-breeze 7.5s ease-in-out infinite;
+  transform-origin: top left;
+}
+
+.animate-pulse-lamp {
+  animation: lamp-pulse 4.5s ease-in-out infinite;
+}
+
+.animate-twinkle {
+  animation: star-twinkle 4s ease-in-out infinite;
+}
+
+.animate-sparkle {
+  animation: sparkle-pulse 5s ease-in-out infinite;
+}
+
+.animate-float {
+  animation: float-dust 6s ease-in-out infinite;
+}
+
+/* Respect user's motion preference */
+@media (prefers-reduced-motion: reduce) {
+  .animate-sway,
+  .animate-breeze,
+  .animate-pulse-lamp,
+  .animate-twinkle,
+  .animate-sparkle,
+  .animate-float {
+    animation: none !important;
+  }
 }
