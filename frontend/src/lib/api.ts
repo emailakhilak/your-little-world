@@ -553,3 +553,218 @@ export async function fetchAchievement(id: string): Promise<Achievement> {
 
   return res.json();
 }
+
+// ==============================================================
+// News Domain (The Faraway Window)
+// ==============================================================
+
+export type NewsCategoryType = "ai" | "mystery" | "science_defence" | "developer";
+
+export interface NewsCategoryMeta {
+  id: NewsCategoryType;
+  label: string;
+  description: string;
+  icon: string;
+}
+
+export const NEWS_CATEGORIES: Record<NewsCategoryType, NewsCategoryMeta> = {
+  ai: {
+    id: "ai",
+    label: "AI Tools & AI News",
+    description: "Machine intelligence breakthroughs, tooling, and dispatches from the digital frontier.",
+    icon: "⚡",
+  },
+  mystery: {
+    id: "mystery",
+    label: "Detective / Mystery / Investigation",
+    description: "Puzzles, forensic inquiries, historical mysteries, and investigative dispatches.",
+    icon: "🔍",
+  },
+  science_defence: {
+    id: "science_defence",
+    label: "Space / Science / Defence-Tech",
+    description: "NASA, ISRO, deep space discoveries, planetary science, and advanced engineering.",
+    icon: "🛰️",
+  },
+  developer: {
+    id: "developer",
+    label: "Software / Developer News",
+    description: "Language evolutions, open source craft, software architectures, and developer stories.",
+    icon: "💻",
+  },
+};
+
+export interface NewsSource {
+  id: string;
+  name: string;
+  base_url: string;
+  feed_url: string;
+  source_type: string;
+  category: string;
+  is_enabled: boolean;
+  reliability_metadata?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NewsSourceListResponse {
+  items: NewsSource[];
+  total: number;
+}
+
+export interface NewsArticle {
+  id: string;
+  source_id: string;
+  source_name?: string | null;
+  external_id?: string | null;
+  canonical_url: string;
+  title: string;
+  description?: string | null;
+  url: string;
+  author?: string | null;
+  published_at?: string | null;
+  fetched_at: string;
+  image_url?: string | null;
+  category: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NewsArticleListResponse {
+  items: NewsArticle[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface IngestionSourceDetail {
+  source_id: string;
+  source_name: string;
+  category: string;
+  status: "success" | "error" | string;
+  articles_seen: number;
+  articles_added: number;
+  articles_skipped: number;
+  error_message?: string | null;
+}
+
+export interface NewsIngestionStats {
+  sources_processed: number;
+  articles_seen: number;
+  articles_added: number;
+  articles_skipped: number;
+  errors: string[];
+  source_details?: IngestionSourceDetail[];
+}
+
+/**
+ * Fetch news articles with category, source, and pagination filtering.
+ */
+export async function fetchNewsArticles(filters?: {
+  category?: string;
+  source_id?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<NewsArticleListResponse> {
+  const token = await getAuthToken();
+  const params = new URLSearchParams();
+  if (filters?.category) params.append("category", filters.category);
+  if (filters?.source_id) params.append("source_id", filters.source_id);
+  if (filters?.limit) params.append("limit", filters.limit.toString());
+  if (filters?.offset) params.append("offset", filters.offset.toString());
+
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const res = await fetch(`${API_BASE_URL}/news/articles${query}`, {
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch news articles (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Fetch a single news article by ID.
+ */
+export async function fetchNewsArticle(id: string): Promise<NewsArticle> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/news/articles/${id}`, {
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch article (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Fetch registered news sources.
+ */
+export async function fetchNewsSources(filters?: {
+  category?: string;
+  is_enabled?: boolean;
+}): Promise<NewsSourceListResponse> {
+  const token = await getAuthToken();
+  const params = new URLSearchParams();
+  if (filters?.category) params.append("category", filters.category);
+  if (filters?.is_enabled !== undefined) params.append("is_enabled", String(filters.is_enabled));
+
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const res = await fetch(`${API_BASE_URL}/news/sources${query}`, {
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch news sources (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Trigger an ingestion run across enabled sources (dev/admin endpoint).
+ */
+export async function triggerNewsIngestion(params?: {
+  category?: string;
+  sync_sources?: boolean;
+}): Promise<NewsIngestionStats> {
+  const token = await getAuthToken();
+  const queryParams = new URLSearchParams();
+  if (params?.category) queryParams.append("category", params.category);
+  if (params?.sync_sources !== undefined) queryParams.append("sync_sources", String(params.sync_sources));
+
+  const query = queryParams.toString() ? `?${queryParams.toString()}` : "";
+  const res = await fetch(`${API_BASE_URL}/news/ingest${query}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to trigger ingestion (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
