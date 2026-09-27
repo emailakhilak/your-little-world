@@ -485,3 +485,71 @@ export async function deleteReminder(reminderId: string): Promise<void> {
     throw new Error(err.detail || `Failed to delete reminder (HTTP ${res.status})`);
   }
 }
+
+export interface Achievement {
+  id: string;
+  user_id: string;
+  milestone_key: string;
+  title: string;
+  description: string;
+  category: "milestone" | "goal" | "recurring" | "progress" | "personal" | string;
+  icon: string;
+  source_type: string | null;
+  source_id: string | null;
+  metadata?: Record<string, unknown> | null;
+  achieved_at: string;
+  created_at: string;
+}
+
+export interface AchievementListResponse {
+  items: Achievement[];
+  total: number;
+}
+
+/**
+ * Fetch all milestones / achievements earned by the user.
+ */
+export async function fetchAchievements(
+  category?: string
+): Promise<AchievementListResponse> {
+  const token = await getAuthToken();
+  const params = new URLSearchParams();
+  if (category) params.append("category", category);
+
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const res = await fetch(`${API_BASE_URL}/achievements${query}`, {
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch achievements (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Fetch a single achievement by ID.
+ */
+export async function fetchAchievement(id: string): Promise<Achievement> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/achievements/${id}`, {
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch achievement (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}

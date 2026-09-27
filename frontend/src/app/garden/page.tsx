@@ -7,11 +7,14 @@ import GoalCard from "@/components/garden/GoalCard";
 import GoalDeleteDialog from "@/components/garden/GoalDeleteDialog";
 import GoalFormModal, { ReminderConfigData } from "@/components/garden/GoalFormModal";
 import GoalProgressRibbon from "@/components/garden/GoalProgressRibbon";
+import { AchievementSection } from "@/components/garden/AchievementSection";
 import {
+  Achievement,
   archiveGoal,
   createGoal,
   createReminder,
   deleteGoal,
+  fetchAchievements,
   fetchGoalInstances,
   fetchGoalReminders,
   fetchGoals,
@@ -31,6 +34,8 @@ export default function GardenPage() {
   const [data, setData] = useState<GoalListResponse | null>(null);
   const [instances, setInstances] = useState<GoalInstance[]>([]);
   const [remindersMap, setRemindersMap] = useState<Record<string, Reminder>>({});
+  const [achievements, setAchievements] = useState<Achievement[]>([]);
+  const [isLoadingAchievements, setIsLoadingAchievements] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,7 +52,7 @@ export default function GardenPage() {
   const [deletingGoalId, setDeletingGoalId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Load goals, recurring instances, and reminders when filters change
+  // Load goals, recurring instances, reminders, and achievements
   useEffect(() => {
     let ignore = false;
     const statusParam = selectedStatus !== "all" ? selectedStatus : undefined;
@@ -56,12 +61,15 @@ export default function GardenPage() {
     Promise.all([
       fetchGoals(statusParam, categoryParam),
       fetchGoalInstances(),
+      fetchAchievements(),
     ])
-      .then(async ([goalsRes, instancesRes]) => {
+      .then(async ([goalsRes, instancesRes, achRes]) => {
         if (!ignore) {
           setData(goalsRes);
           setInstances(instancesRes.items);
+          setAchievements(achRes.items);
           setIsLoading(false);
+          setIsLoadingAchievements(false);
 
           // Fetch reminders for active goals
           const remMap: Record<string, Reminder> = {};
@@ -90,6 +98,7 @@ export default function GardenPage() {
               : "Unable to connect to the garden soil. Please try again."
           );
           setIsLoading(false);
+          setIsLoadingAchievements(false);
         }
       });
 
@@ -103,12 +112,15 @@ export default function GardenPage() {
       const statusParam = selectedStatus !== "all" ? selectedStatus : undefined;
       const categoryParam = selectedCategory !== "all" ? selectedCategory : undefined;
 
-      const [goalsRes, instancesRes] = await Promise.all([
+      const [goalsRes, instancesRes, achRes] = await Promise.all([
         fetchGoals(statusParam, categoryParam),
         fetchGoalInstances(),
+        fetchAchievements(),
       ]);
       setData(goalsRes);
       setInstances(instancesRes.items);
+      setAchievements(achRes.items);
+      setIsLoadingAchievements(false);
 
       const remMap: Record<string, Reminder> = {};
       await Promise.all(
@@ -417,6 +429,12 @@ export default function GardenPage() {
             );
           })}
       </section>
+
+      {/* Garden Keepsakes / Milestones */}
+      <AchievementSection
+        achievements={achievements}
+        isLoading={isLoadingAchievements}
+      />
 
       {/* Goal Create / Edit Form Modal */}
       <GoalFormModal

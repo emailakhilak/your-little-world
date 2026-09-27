@@ -14,6 +14,7 @@ from app.schemas.goal_instance import (
     GoalInstanceListResponse,
     GoalInstanceResponse,
 )
+from app.services.achievement_service import AchievementService
 from app.services.recurrence import RecurrenceCalculator
 
 logger = logging.getLogger(__name__)
@@ -22,8 +23,13 @@ logger = logging.getLogger(__name__)
 class GoalInstanceService:
     """Service handling recurring goal instance generation, listing, and completion."""
 
-    def __init__(self, repository: GoalInstanceRepository | None = None):
+    def __init__(
+        self,
+        repository: GoalInstanceRepository | None = None,
+        achievement_service: AchievementService | None = None,
+    ):
         self.repository = repository or GoalInstanceRepository()
+        self.achievement_service = achievement_service or AchievementService()
 
     async def get_instance_or_404(
         self, db: AsyncSession, instance_id: str, user_id: str
@@ -76,6 +82,9 @@ class GoalInstanceService:
             updates["completed_at"] = now_utc()
 
         updated = await self.repository.update(db, instance, updates)
+        if updated.status == "completed":
+            await self.achievement_service.evaluate_recurring_milestones(db, user_id, updated)
+
         return GoalInstanceResponse.model_validate(updated)
 
     async def generate_due_instances(

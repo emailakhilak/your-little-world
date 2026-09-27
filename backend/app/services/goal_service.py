@@ -7,13 +7,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.goal import Goal
 from app.repositories.goal_repository import GoalRepository
 from app.schemas.goal import GoalCreate, GoalListResponse, GoalResponse, GoalUpdate
+from app.services.achievement_service import AchievementService
 
 
 class GoalService:
     """Service encapsulating goal business logic, validations, and ownership enforcement."""
 
-    def __init__(self, repository: GoalRepository | None = None):
+    def __init__(
+        self,
+        repository: GoalRepository | None = None,
+        achievement_service: AchievementService | None = None,
+    ):
         self.repository = repository or GoalRepository()
+        self.achievement_service = achievement_service or AchievementService()
 
     async def get_goal_or_404(self, db: AsyncSession, goal_id: str, user_id: str) -> Goal:
         """Retrieve goal ensuring strict user isolation; raise 404 if not found or unauthorized."""
@@ -82,6 +88,9 @@ class GoalService:
             update_dict["progress_target"] = prog_curr
 
         updated_goal = await self.repository.update(db, goal, update_dict)
+        if updated_goal.status == "completed":
+            await self.achievement_service.evaluate_goal_milestones(db, user_id, updated_goal)
+
         return GoalResponse.model_validate(updated_goal)
 
     async def toggle_complete(self, db: AsyncSession, goal_id: str, user_id: str) -> GoalResponse:
@@ -98,6 +107,9 @@ class GoalService:
             updates["progress_current"] = goal.progress_target
 
         updated_goal = await self.repository.update(db, goal, updates)
+        if updated_goal.status == "completed":
+            await self.achievement_service.evaluate_goal_milestones(db, user_id, updated_goal)
+
         return GoalResponse.model_validate(updated_goal)
 
     async def archive_goal(self, db: AsyncSession, goal_id: str, user_id: str) -> GoalResponse:
