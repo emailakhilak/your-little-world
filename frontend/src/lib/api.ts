@@ -1,3 +1,5 @@
+import { getSupabaseClient } from "@/lib/supabase/client";
+
 export interface DatabaseHealth {
   status: "connected" | "disconnected" | "unknown";
   dialect?: string;
@@ -20,8 +22,140 @@ export interface AuthMeResponse {
   message: string;
 }
 
+export interface Goal {
+  id: string;
+  user_id: string;
+  title: string;
+  description: string | null;
+  category: string;
+  status: "active" | "completed" | "archived";
+  icon: string;
+  priority: string;
+  target_date: string | null;
+  completed_at: string | null;
+  archived_at: string | null;
+  progress_current: number;
+  progress_target: number;
+  recurrence_cadence: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GoalListResponse {
+  items: Goal[];
+  total: number;
+  active_count: number;
+  completed_count: number;
+  archived_count: number;
+}
+
+export interface GoalCreateInput {
+  title: string;
+  description?: string | null;
+  category?: string;
+  icon?: string;
+  priority?: string;
+  target_date?: string | null;
+  progress_current?: number;
+  progress_target?: number;
+  recurrence_cadence?: string | null;
+}
+
+export interface GoalUpdateInput {
+  title?: string;
+  description?: string | null;
+  category?: string;
+  status?: string;
+  icon?: string;
+  priority?: string;
+  target_date?: string | null;
+  progress_current?: number;
+  progress_target?: number;
+  recurrence_cadence?: string | null;
+}
+
+export interface GoalInstance {
+  id: string;
+  goal_id: string;
+  user_id: string;
+  period_key: string;
+  scheduled_date: string;
+  status: "active" | "completed" | "skipped";
+  completed_at: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GoalInstanceListResponse {
+  items: GoalInstance[];
+  total: number;
+}
+
+export interface Reminder {
+  id: string;
+  goal_id: string;
+  user_id: string;
+  reminder_time: string;
+  timezone: string;
+  is_enabled: boolean;
+  channel: string;
+  last_triggered_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReminderListResponse {
+  items: Reminder[];
+  total: number;
+}
+
+export interface ReminderCreateInput {
+  reminder_time: string;
+  timezone?: string;
+  is_enabled?: boolean;
+  channel?: string;
+}
+
+export interface ReminderUpdateInput {
+  reminder_time?: string;
+  timezone?: string;
+  is_enabled?: boolean;
+  channel?: string;
+}
+
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+
+/**
+ * Retrieves the current authentication bearer token.
+ * Defaults to Supabase session token, with local persistent fallback in dev mode.
+ */
+export async function getAuthToken(): Promise<string> {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (data?.session?.access_token) {
+        return data.session.access_token;
+      }
+    } catch {
+      // Ignore if supabase cannot be reached
+    }
+  }
+
+  // Fallback for local development or standalone exploration
+  if (typeof window !== "undefined") {
+    let localToken = localStorage.getItem("ylw_dev_user_token");
+    if (!localToken) {
+      localToken = `dev-user-${Math.random().toString(36).substring(2, 9)}`;
+      localStorage.setItem("ylw_dev_user_token", localToken);
+    }
+    return localToken;
+  }
+
+  return "dev-user";
+}
 
 /**
  * Pings the backend health endpoint.
@@ -44,9 +178,7 @@ export async function getBackendHealth(): Promise<HealthCheckResponse> {
 /**
  * Verifies Supabase authentication token with the backend.
  */
-export async function verifyBackendAuth(
-  token: string
-): Promise<AuthMeResponse> {
+export async function verifyBackendAuth(token: string): Promise<AuthMeResponse> {
   const res = await fetch(`${API_BASE_URL}/auth/me`, {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -62,4 +194,294 @@ export async function verifyBackendAuth(
   }
 
   return res.json();
+}
+
+/**
+ * Fetch all goals for the user with optional filters.
+ */
+export async function fetchGoals(
+  status?: string,
+  category?: string
+): Promise<GoalListResponse> {
+  const token = await getAuthToken();
+  const params = new URLSearchParams();
+  if (status) params.append("status", status);
+  if (category) params.append("category", category);
+
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const res = await fetch(`${API_BASE_URL}/goals${query}`, {
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch goals (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Plant a new goal in the garden.
+ */
+export async function createGoal(data: GoalCreateInput): Promise<Goal> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/goals`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to plant goal (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Update an existing goal.
+ */
+export async function updateGoal(
+  id: string,
+  data: GoalUpdateInput
+): Promise<Goal> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/goals/${id}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to update goal (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Toggle a goal between active and completed.
+ */
+export async function toggleGoalComplete(id: string): Promise<Goal> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/goals/${id}/complete`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to toggle goal (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Archive a goal (rest in soil).
+ */
+export async function archiveGoal(id: string): Promise<Goal> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/goals/${id}/archive`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to archive goal (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Permanently delete a goal.
+ */
+export async function deleteGoal(id: string): Promise<void> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/goals/${id}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to delete goal (HTTP ${res.status})`);
+  }
+}
+
+/**
+ * Fetch goal instances (occurrences) with optional filters.
+ */
+export async function fetchGoalInstances(
+  goalId?: string,
+  status?: string,
+  date?: string
+): Promise<GoalInstanceListResponse> {
+  const token = await getAuthToken();
+  const params = new URLSearchParams();
+  if (goalId) params.append("goal_id", goalId);
+  if (status) params.append("status", status);
+  if (date) params.append("date", date);
+
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const res = await fetch(`${API_BASE_URL}/goals/instances${query}`, {
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch instances (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Toggle completion of a specific goal instance.
+ */
+export async function toggleInstanceComplete(
+  instanceId: string
+): Promise<GoalInstance> {
+  const token = await getAuthToken();
+  const res = await fetch(
+    `${API_BASE_URL}/goals/instances/${instanceId}/complete`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
+    }
+  );
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to toggle occurrence (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Fetch reminders attached to a goal.
+ */
+export async function fetchGoalReminders(
+  goalId: string
+): Promise<ReminderListResponse> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/goals/${goalId}/reminders`, {
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch reminders (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Create a reminder for a goal.
+ */
+export async function createReminder(
+  goalId: string,
+  data: ReminderCreateInput
+): Promise<Reminder> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/goals/${goalId}/reminders`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to create reminder (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Update an existing reminder.
+ */
+export async function updateReminder(
+  reminderId: string,
+  data: ReminderUpdateInput
+): Promise<Reminder> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/goals/reminders/${reminderId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to update reminder (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Delete a reminder.
+ */
+export async function deleteReminder(reminderId: string): Promise<void> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/goals/reminders/${reminderId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to delete reminder (HTTP ${res.status})`);
+  }
 }

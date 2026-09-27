@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_v1_router
 from app.core.config import settings
+from app.core.scheduler import garden_scheduler
 
 logging.basicConfig(
     level=logging.INFO if not settings.DEBUG else logging.DEBUG,
@@ -17,7 +18,9 @@ logger = logging.getLogger("your_little_world")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(f"Starting {settings.APP_NAME} in [{settings.ENVIRONMENT}] mode...")
+    garden_scheduler.start()
     yield
+    garden_scheduler.stop()
     logger.info(f"Shutting down {settings.APP_NAME}...")
 
 
