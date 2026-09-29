@@ -45,6 +45,7 @@ class DailyEditionService:
         if existing and not force_regenerate:
             return existing
 
+        existing_meta = dict(existing.metadata_json or {}) if existing else {}
         if existing and force_regenerate:
             # Clear existing articles in edition
             await db.delete(existing)
@@ -52,12 +53,16 @@ class DailyEditionService:
 
         # Build new daily edition
         title = f"Faraway Window — {edition_date.strftime('%B %d, %Y')}"
+        meta = {"generated_for": edition_date.isoformat()}
+        if "notified_users" in existing_meta:
+            meta["notified_users"] = existing_meta["notified_users"]
+
         edition = DailyEdition(
             edition_date=edition_date,
             title=title,
             status="published",
             lead_summary="A daily collection of dispatches across intelligence, deep space, mysteries, and craft.",
-            metadata_json={"generated_for": edition_date.isoformat()},
+            metadata_json=meta,
         )
         db.add(edition)
         try:

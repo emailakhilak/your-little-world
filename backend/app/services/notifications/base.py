@@ -6,13 +6,15 @@ from typing import Any
 
 @dataclass(frozen=True)
 class NotificationPayload:
-    """Standardized payload for reminder notifications."""
+    """Standardized payload for world notifications (garden reminders, daily news dispatches, etc.)."""
 
-    reminder_id: str
-    goal_id: str
-    user_id: str
-    title: str
-    message: str
+    user_id: str = ""
+    title: str = ""
+    message: str = ""
+    reminder_id: str | None = None
+    goal_id: str | None = None
+    edition_id: str | None = None
+    notification_type: str = "reminder"  # "reminder", "news_edition"
     channel: str = "log"
     scheduled_time: str = ""
     timezone: str = "Asia/Kolkata"
@@ -30,7 +32,7 @@ class NotificationResult:
 
 
 class BaseNotificationProvider(ABC):
-    """Abstract contract for delivering garden reminders."""
+    """Abstract contract for delivering world notifications."""
 
     @abstractmethod
     async def send(self, payload: NotificationPayload) -> NotificationResult:

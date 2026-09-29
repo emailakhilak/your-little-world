@@ -273,6 +273,7 @@ async def run_daily_job(
         db=db,
         target_timezone=target_tz,
         force=force,
+        user_id=current_user.user_id,
     )
 
 

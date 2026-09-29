@@ -201,6 +201,9 @@ class NewsService:
         target_date: date | None = None,
         force: bool = False,
         as_of: Any | None = None,
+        user_id: str | None = None,
+        notification_provider: Any | None = None,
+        notify: bool = True,
     ) -> dict[str, Any]:
         """Run daily news ingestion and edition curation pass."""
         return await self.daily_job_service.execute_daily_update(
@@ -209,4 +212,7 @@ class NewsService:
             target_date=target_date,
             force=force,
             as_of=as_of,
+            user_id=user_id,
+            notification_provider=notification_provider,
+            notify=notify,
         )

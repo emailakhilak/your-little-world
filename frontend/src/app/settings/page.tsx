@@ -181,9 +181,9 @@ export default function SettingsPage() {
               </span>
               <div className="flex items-center justify-between">
                 <div>
-                  <span className="text-sm text-[#9D978C] block">Garden &amp; Milestone Reminders</span>
+                  <span className="text-sm text-[#9D978C] block">Reminders &amp; Daily Dispatches</span>
                   <span className="text-xs text-[#9D978C]/60">
-                    Sends gentle notifications when goal checkpoints are due.
+                    Sends gentle whispers for Garden goals and Faraway Window daily editions.
                   </span>
                 </div>
                 <input

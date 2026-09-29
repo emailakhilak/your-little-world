@@ -13,6 +13,8 @@ from app.models.scheduled_job import ScheduledJob
 from app.models.user_preference import UserPreference
 from app.services.goal_instance_service import GoalInstanceService
 from app.services.news.daily_job import DailyNewsJobService
+from app.services.notifications.base import BaseNotificationProvider
+from app.services.notifications.log_provider import default_notification_provider
 from app.services.reminder_service import ReminderService
 
 logger = logging.getLogger("your_little_world.scheduler")
@@ -31,11 +33,17 @@ class GardenScheduler:
         goal_instance_service: GoalInstanceService | None = None,
         reminder_service: ReminderService | None = None,
         daily_news_job_service: DailyNewsJobService | None = None,
+        notification_provider: BaseNotificationProvider | None = None,
     ):
         self.interval_seconds = interval_seconds
         self.instance_service = goal_instance_service or GoalInstanceService()
-        self.reminder_service = reminder_service or ReminderService()
-        self.daily_news_job_service = daily_news_job_service or DailyNewsJobService()
+        self.notification_provider = notification_provider or default_notification_provider
+        self.reminder_service = reminder_service or ReminderService(
+            notification_provider=self.notification_provider
+        )
+        self.daily_news_job_service = daily_news_job_service or DailyNewsJobService(
+            notification_provider=self.notification_provider
+        )
         self._task: asyncio.Task | None = None
         self._running = False
 
@@ -121,12 +129,24 @@ class GardenScheduler:
                 )
                 jobs = (await db.execute(stmt_jobs)).scalars().all()
 
-                # 1. Skip if already succeeded
-                if any(j.status == "success" for j in jobs):
+                # 1. Skip if already succeeded for this timezone
+                if any(
+                    j.status == "success"
+                    and (not j.metadata_json or j.metadata_json.get("timezone") == tz_name)
+                    for j in jobs
+                ):
                     continue
 
                 # 2. Skip if active execution in progress (started within 10 minutes)
-                running_job = next((j for j in jobs if j.status == "running"), None)
+                running_job = next(
+                    (
+                        j
+                        for j in jobs
+                        if j.status == "running"
+                        and (not j.metadata_json or j.metadata_json.get("timezone") == tz_name)
+                    ),
+                    None,
+                )
                 if running_job:
                     started = to_utc(running_job.started_at)
                     if (current_utc - started).total_seconds() < 600:
@@ -162,6 +182,7 @@ class GardenScheduler:
                     target_timezone=tz_name,
                     target_date=target_date,
                     as_of=as_of,
+                    user_id=user_id,
                 )
                 executed_results.append(res)
 

@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
 
+    # Notification Settings
+    NOTIFICATION_PROVIDER: str = "log"  # "log", "webhook"
+    NOTIFICATION_WEBHOOK_URL: str = ""
+
     # CORS
     CORS_ORIGINS: list[str] = [
         "http://localhost:3000",

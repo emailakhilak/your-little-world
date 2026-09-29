@@ -178,7 +178,12 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             <div className="pt-2 border-t border-[#252A34]">
               <span className="block text-[#EAE6DF] font-medium mb-2">🔔 Whispers &amp; Notifications</span>
               <div className="flex items-center justify-between">
-                <span className="text-[#9D978C]">Garden &amp; Milestone Reminders</span>
+                <div>
+                  <span className="text-[#EAE6DF] block">Reminders &amp; Daily Dispatches</span>
+                  <span className="text-[10px] text-[#9D978C]/60">
+                    Garden goals and Faraway Window daily dispatches.
+                  </span>
+                </div>
                 <input
                   type="checkbox"
                   checked={notificationsEnabled}
