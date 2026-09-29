@@ -30,7 +30,7 @@ export default function Home() {
   return (
     <main className="min-h-screen px-4 py-6 sm:py-10 flex flex-col justify-between items-center relative overflow-hidden">
       {/* Top Quiet Bar */}
-      <header className="w-full max-w-5xl flex items-center justify-between z-10">
+      <header className="w-full max-w-6xl flex items-center justify-between z-10">
         <div className="flex items-center gap-2 select-none">
           <span className="text-lg">✦</span>
           <span className="font-serif text-sm tracking-wide text-[#EAE6DF]/90 font-medium">
