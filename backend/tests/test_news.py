@@ -304,14 +304,14 @@ async def test_article_listing_filtering_and_ordering(async_client: AsyncClient)
             raw_url=f"https://ai.example.com/post/{unique_suffix}",
             raw_guid=f"ai-{unique_suffix}",
             raw_description="Artificial intelligence update.",
-            raw_published="Sun, 27 Sep 2026 09:00:00 GMT",
+            raw_published="Fri, 01 Jan 2099 09:00:00 GMT",
         ),
         RawFeedEntry(
             raw_title=f"Detective Case {unique_suffix}",
             raw_url=f"https://mystery.example.com/case/{unique_suffix}",
             raw_guid=f"mystery-{unique_suffix}",
             raw_description="Investigation findings revealed.",
-            raw_published="Sun, 27 Sep 2026 11:00:00 GMT",
+            raw_published="Fri, 01 Jan 2099 11:00:00 GMT",
         ),
     ]
 

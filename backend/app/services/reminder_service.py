@@ -95,13 +95,14 @@ class ReminderService:
         db: AsyncSession,
         as_of: datetime | None = None,
         provider: BaseNotificationProvider | None = None,
+        user_id: str | None = None,
     ) -> int:
         """
         Evaluates enabled reminders across user timezones and dispatches notifications.
         Guarantees idempotency via last_period_key tracking to prevent duplicate sends.
         """
         active_provider = provider or self.notification_provider
-        reminders = await self.repository.list_all_enabled(db)
+        reminders = await self.repository.list_all_enabled(db, user_id=user_id)
         processed_count = 0
 
         for reminder in reminders:

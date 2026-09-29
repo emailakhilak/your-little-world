@@ -626,8 +626,42 @@ export interface NewsArticle {
   fetched_at: string;
   image_url?: string | null;
   category: string;
+  summary?: string | null;
+  key_points?: string[] | null;
+  why_it_matters?: string | null;
+  summary_status?: string;
+  summary_provider?: string | null;
+  is_read?: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface DailyEditionArticle {
+  id: string;
+  edition_id: string;
+  article_id: string;
+  category: string;
+  position: number;
+  article: NewsArticle;
+}
+
+export interface DailyEdition {
+  id: string;
+  edition_date: string;
+  title: string;
+  status: string;
+  lead_summary?: string | null;
+  metadata_json?: Record<string, unknown> | null;
+  edition_articles: DailyEditionArticle[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DailyEditionListResponse {
+  items: DailyEdition[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 export interface NewsArticleListResponse {
@@ -768,3 +802,781 @@ export async function triggerNewsIngestion(params?: {
 
   return res.json();
 }
+
+/**
+ * Fetch today's curated Daily Edition.
+ */
+export async function fetchTodayEdition(forceRegenerate: boolean = false): Promise<DailyEdition> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/news/editions/today?force_regenerate=${forceRegenerate}`, {
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to load today's edition (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Fetch list of past Daily Editions.
+ */
+export async function fetchDailyEditions(limit: number = 30, offset: number = 0): Promise<DailyEditionListResponse> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/news/editions?limit=${limit}&offset=${offset}`, {
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to load editions (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Mark a news article as read.
+ */
+export async function markArticleAsRead(articleId: string): Promise<void> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/news/articles/${articleId}/read`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to mark article as read (HTTP ${res.status})`);
+  }
+}
+
+/**
+ * Trigger on-demand AI summarization for an article.
+ */
+export async function summarizeArticle(articleId: string, force: boolean = false): Promise<NewsArticle> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/news/articles/${articleId}/summarize?force=${force}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to summarize article (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+/* =========================================================================
+ * LITTLE ATTIC NOTES
+ * ========================================================================= */
+
+export interface Note {
+  id: string;
+  user_id: string;
+  title: string;
+  content: string;
+  tags: string[];
+  category: string;
+  is_pinned: boolean;
+  is_archived: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NoteCreateInput {
+  title: string;
+  content: string;
+  tags?: string[];
+  category?: string;
+  is_pinned?: boolean;
+}
+
+export interface NoteUpdateInput {
+  title?: string;
+  content?: string;
+  tags?: string[];
+  category?: string;
+  is_pinned?: boolean;
+  is_archived?: boolean;
+}
+
+export interface NoteListResponse {
+  items: Note[];
+  total: number;
+  pinned_count: number;
+  archived_count: number;
+}
+
+export interface NoteAISuggestion {
+  suggested_category: string;
+  suggested_tags: string[];
+}
+
+export async function fetchNotes(filters?: {
+  category?: string;
+  search?: string;
+  tag?: string;
+  is_archived?: boolean;
+  limit?: number;
+  offset?: number;
+}): Promise<NoteListResponse> {
+  const token = await getAuthToken();
+  const params = new URLSearchParams();
+  if (filters?.category) params.append("category", filters.category);
+  if (filters?.search) params.append("search", filters.search);
+  if (filters?.tag) params.append("tag", filters.tag);
+  if (filters?.is_archived !== undefined) params.append("is_archived", String(filters.is_archived));
+  if (filters?.limit) params.append("limit", String(filters.limit));
+  if (filters?.offset) params.append("offset", String(filters.offset));
+
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const res = await fetch(`${API_BASE_URL}/notes${query}`, {
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch notes (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+export async function createNote(data: NoteCreateInput): Promise<Note> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/notes`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to create note (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+export async function updateNote(noteId: string, data: NoteUpdateInput): Promise<Note> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/notes/${noteId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to update note (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+export async function deleteNote(noteId: string): Promise<void> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/notes/${noteId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to delete note (HTTP ${res.status})`);
+  }
+}
+
+export async function togglePinNote(noteId: string): Promise<Note> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/notes/${noteId}/pin`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to pin note (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+export async function toggleArchiveNote(noteId: string): Promise<Note> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/notes/${noteId}/archive`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to archive note (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+export async function suggestNoteTags(data: { title: string; content: string }): Promise<NoteAISuggestion> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/notes/suggest-tags`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to get AI suggestions (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+// ============================================================================
+// MOON ROOM (DIARY) API
+// ============================================================================
+
+export interface DiaryEntry {
+  id: string;
+  user_id: string;
+  entry_date: string;
+  title: string | null;
+  content: string;
+  mood: string | null;
+  tags: string[];
+  word_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DiaryListResponse {
+  items: DiaryEntry[];
+  total: number;
+}
+
+export interface DiaryUpsertInput {
+  entry_date: string;
+  title?: string | null;
+  content: string;
+  mood?: string | null;
+  tags?: string[];
+}
+
+export interface DiaryReflectionResponse {
+  entry_id: string;
+  reflection: string;
+  themes: string[];
+  questions_to_consider: string[];
+  tone: string;
+  provider: string;
+}
+
+export async function fetchDiaryEntries(params?: {
+  search?: string;
+  mood?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<DiaryListResponse> {
+  const token = await getAuthToken();
+  const query = new URLSearchParams();
+  if (params?.search) query.set("search", params.search);
+  if (params?.mood) query.set("mood", params.mood);
+  if (params?.limit) query.set("limit", String(params.limit));
+  if (params?.offset) query.set("offset", String(params.offset));
+
+  const url = `${API_BASE_URL}/diary/entries${query.toString() ? `?${query.toString()}` : ""}`;
+  const res = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch diary entries (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+export async function fetchDiaryEntryByDate(dateStr: string): Promise<DiaryEntry | null> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/diary/entries/by-date/${dateStr}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (res.status === 404) {
+    return null;
+  }
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch diary entry for date (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+export async function upsertDiaryEntry(data: DiaryUpsertInput): Promise<DiaryEntry> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/diary/entries`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to save diary entry (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+export async function deleteDiaryEntry(entryId: string): Promise<void> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/diary/entries/${entryId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to delete diary entry (HTTP ${res.status})`);
+  }
+}
+
+export async function reflectOnDiaryEntry(entryId: string): Promise<DiaryReflectionResponse> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/diary/entries/${entryId}/reflect`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to generate reflection (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+// ============================================================================
+// STORYBOOK API
+// ============================================================================
+
+export interface Project {
+  id: string;
+  user_id: string;
+  title: string;
+  description: string | null;
+  status: "in_progress" | "completed" | "archived" | "concept" | string;
+  technologies: string[];
+  github_url: string | null;
+  live_url: string | null;
+  start_date: string | null;
+  completion_date: string | null;
+  lessons_learned: string | null;
+  is_featured: boolean;
+  order_index: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectCreateInput {
+  title: string;
+  description?: string | null;
+  status?: string;
+  technologies?: string[];
+  github_url?: string | null;
+  live_url?: string | null;
+  start_date?: string | null;
+  completion_date?: string | null;
+  lessons_learned?: string | null;
+  is_featured?: boolean;
+  order_index?: number;
+}
+
+export interface ProjectUpdateInput {
+  title?: string;
+  description?: string | null;
+  status?: string;
+  technologies?: string[];
+  github_url?: string | null;
+  live_url?: string | null;
+  start_date?: string | null;
+  completion_date?: string | null;
+  lessons_learned?: string | null;
+  is_featured?: boolean;
+  order_index?: number;
+}
+
+export interface StoryChapter {
+  id: string;
+  user_id: string;
+  title: string;
+  description: string | null;
+  period: string | null;
+  order_index: number;
+  milestones: Array<{ title: string; date?: string; notes?: string }>;
+  reflections: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StoryChapterCreateInput {
+  title: string;
+  description?: string | null;
+  period?: string | null;
+  order_index?: number;
+  milestones?: Array<{ title: string; date?: string; notes?: string }>;
+  reflections?: string | null;
+}
+
+export interface StoryChapterUpdateInput {
+  title?: string;
+  description?: string | null;
+  period?: string | null;
+  order_index?: number;
+  milestones?: Array<{ title: string; date?: string; notes?: string }>;
+  reflections?: string | null;
+}
+
+export interface StorybookAchievementItem {
+  id: string;
+  key: string;
+  title: string;
+  description: string;
+  icon: string;
+  category: string;
+  unlocked_at: string;
+}
+
+export interface StorybookOverview {
+  projects_count: number;
+  completed_projects_count: number;
+  featured_projects_count: number;
+  chapters_count: number;
+  achievements_earned_count: number;
+  featured_projects: Project[];
+  recent_chapters: StoryChapter[];
+  earned_achievements: StorybookAchievementItem[];
+  all_technologies: string[];
+}
+
+export async function fetchStorybookOverview(): Promise<StorybookOverview> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/storybook/overview`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch storybook overview (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+export async function fetchProjects(params?: {
+  status?: string;
+  featured_only?: boolean;
+}): Promise<{ items: Project[]; total: number }> {
+  const token = await getAuthToken();
+  const query = new URLSearchParams();
+  if (params?.status) query.set("status", params.status);
+  if (params?.featured_only) query.set("featured_only", "true");
+
+  const url = `${API_BASE_URL}/storybook/projects${query.toString() ? `?${query.toString()}` : ""}`;
+  const res = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch projects (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+export async function createProject(data: ProjectCreateInput): Promise<Project> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/storybook/projects`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to create project (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+export async function updateProject(id: string, data: ProjectUpdateInput): Promise<Project> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/storybook/projects/${id}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to update project (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+export async function deleteProject(id: string): Promise<void> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/storybook/projects/${id}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to delete project (HTTP ${res.status})`);
+  }
+}
+
+export async function toggleProjectFeatured(id: string): Promise<Project> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/storybook/projects/${id}/featured`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to toggle project featured status (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+export async function fetchChapters(): Promise<{ items: StoryChapter[]; total: number }> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/storybook/chapters`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch story chapters (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+export async function createChapter(data: StoryChapterCreateInput): Promise<StoryChapter> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/storybook/chapters`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to create chapter (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+export async function updateChapter(id: string, data: StoryChapterUpdateInput): Promise<StoryChapter> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/storybook/chapters/${id}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to update chapter (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+export async function deleteChapter(id: string): Promise<void> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/storybook/chapters/${id}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to delete chapter (HTTP ${res.status})`);
+  }
+}
+
+// ============================================================================
+// SETTINGS / PREFERENCES API
+// ============================================================================
+
+export interface UserPreferences {
+  id: string;
+  user_id: string;
+  display_name: string | null;
+  timezone: string;
+  news_daily_update: boolean;
+  news_update_time: string;
+  notifications_enabled: boolean;
+  notification_channels: string[];
+  reduced_motion: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserPreferencesUpdateInput {
+  display_name?: string | null;
+  timezone?: string;
+  news_daily_update?: boolean;
+  news_update_time?: string;
+  notifications_enabled?: boolean;
+  notification_channels?: string[];
+  reduced_motion?: boolean;
+}
+
+export async function fetchUserPreferences(): Promise<UserPreferences> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/settings/preferences`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch preferences (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+export async function updateUserPreferences(data: UserPreferencesUpdateInput): Promise<UserPreferences> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/settings/preferences`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to update preferences (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+
+
+

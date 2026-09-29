@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -184,7 +185,8 @@ async def test_due_reminder_processing_and_duplicate_prevention(async_client: As
     Test that due reminders trigger notifications and do not trigger twice
     on the same day (idempotent duplicate prevention).
     """
-    headers = {"Authorization": "Bearer test-user-rem-due"}
+    uid = f"test-user-rem-due-{uuid.uuid4().hex[:8]}"
+    headers = {"Authorization": f"Bearer {uid}"}
     default_notification_provider.clear_history()
 
     # Create goal & reminder scheduled for 09:00 in Asia/Kolkata
@@ -208,14 +210,18 @@ async def test_due_reminder_processing_and_duplicate_prevention(async_client: As
 
     reminder_service = ReminderService(notification_provider=default_notification_provider)
     async with AsyncSessionLocal() as session:
-        fired_count = await reminder_service.process_due_reminders(session, as_of=early_time)
+        fired_count = await reminder_service.process_due_reminders(
+            session, as_of=early_time, user_id=uid
+        )
         assert fired_count == 0
         assert len(default_notification_provider.dispatched_history) == 0
 
     # 2. Trigger scheduler pass at 09:15 AM (after 09:00) -> reminder MUST fire!
     due_time = datetime(2026, 9, 27, 9, 15, tzinfo=ZoneInfo("Asia/Kolkata"))
     async with AsyncSessionLocal() as session:
-        fired_count = await reminder_service.process_due_reminders(session, as_of=due_time)
+        fired_count = await reminder_service.process_due_reminders(
+            session, as_of=due_time, user_id=uid
+        )
         assert fired_count >= 1
         assert len(default_notification_provider.dispatched_history) >= 1
         last_notif = default_notification_provider.dispatched_history[-1]
@@ -225,7 +231,9 @@ async def test_due_reminder_processing_and_duplicate_prevention(async_client: As
     history_len = len(default_notification_provider.dispatched_history)
     later_time = datetime(2026, 9, 27, 9, 30, tzinfo=ZoneInfo("Asia/Kolkata"))
     async with AsyncSessionLocal() as session:
-        fired_count = await reminder_service.process_due_reminders(session, as_of=later_time)
+        fired_count = await reminder_service.process_due_reminders(
+            session, as_of=later_time, user_id=uid
+        )
         assert fired_count == 0
         # Notification count has not increased
         assert len(default_notification_provider.dispatched_history) == history_len

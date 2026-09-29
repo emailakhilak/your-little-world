@@ -24,6 +24,15 @@ class Settings(BaseSettings):
     SUPABASE_ANON_KEY: str = ""
     SUPABASE_JWT_SECRET: str = ""
 
+    # Timezone
+    DEFAULT_TIMEZONE: str = "Asia/Kolkata"
+
+    # LLM Settings
+    LLM_PROVIDER: str = "mock"  # "mock", "gemini", "openai", "anthropic", "none"
+    GEMINI_API_KEY: str = ""
+    OPENAI_API_KEY: str = ""
+    ANTHROPIC_API_KEY: str = ""
+
     # CORS
     CORS_ORIGINS: list[str] = [
         "http://localhost:3000",

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -40,12 +40,78 @@ class NewsArticleResponse(BaseModel):
     fetched_at: datetime
     image_url: str | None = None
     category: str
+    summary: str | None = None
+    key_points: list[str] | None = None
+    why_it_matters: str | None = None
+    summary_status: str = "none"
+    summary_provider: str | None = None
+    is_read: bool = False
     created_at: datetime
     updated_at: datetime
 
 
 class NewsArticleListResponse(BaseModel):
     items: list[NewsArticleResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+class DailyEditionArticleResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    edition_id: str
+    article_id: str
+    category: str
+    position: int
+    article: NewsArticleResponse
+
+
+class DailyEditionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    edition_date: date
+    title: str
+    status: str
+    lead_summary: str | None = None
+    metadata_json: dict[str, Any] | None = None
+    edition_articles: list[DailyEditionArticleResponse] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class DailyEditionListResponse(BaseModel):
+    items: list[DailyEditionResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+class UserArticleReadResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    user_id: str
+    article_id: str
+    read_at: datetime
+    completed: bool
+
+
+class ReadingHistoryItemResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    user_id: str
+    article_id: str
+    read_at: datetime
+    completed: bool
+    article: NewsArticleResponse | None = None
+
+
+class ReadingHistoryListResponse(BaseModel):
+    items: list[ReadingHistoryItemResponse]
     total: int
     limit: int
     offset: int

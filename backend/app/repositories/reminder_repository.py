@@ -37,11 +37,15 @@ class ReminderRepository:
         result = await db.execute(query)
         return list(result.scalars().all())
 
-    async def list_all_enabled(self, db: AsyncSession) -> list[Reminder]:
+    async def list_all_enabled(
+        self, db: AsyncSession, user_id: str | None = None
+    ) -> list[Reminder]:
         """Fetch all enabled reminders across the system for due schedule evaluation."""
         query = (
             select(Reminder).options(selectinload(Reminder.goal)).where(Reminder.is_enabled == True)  # noqa: E712
         )
+        if user_id is not None:
+            query = query.where(Reminder.user_id == user_id)
         result = await db.execute(query)
         return list(result.scalars().all())
 
