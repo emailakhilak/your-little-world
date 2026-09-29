@@ -2,6 +2,7 @@ import logging
 from datetime import date
 
 from sqlalchemy import desc, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -59,7 +60,15 @@ class DailyEditionService:
             metadata_json={"generated_for": edition_date.isoformat()},
         )
         db.add(edition)
-        await db.flush()
+        try:
+            await db.flush()
+        except IntegrityError:
+            await db.rollback()
+            # Race condition: another execution already created the edition for this date
+            existing = await self.get_edition_by_date(db, edition_date)
+            if existing:
+                return existing
+            raise
 
         # Select top articles per category
         categories = ["ai", "mystery", "science_defence", "developer"]

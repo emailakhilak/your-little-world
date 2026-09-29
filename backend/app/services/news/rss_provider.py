@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import xml.etree.ElementTree as ET
 
@@ -68,38 +69,58 @@ class RssNewsProvider(NewsProvider):
         return self._parse_feed_xml(xml_content, feed_url)
 
     async def _fetch_feed_content(self, feed_url: str, timeout_seconds: float) -> str:
-        """Execute HTTP request with appropriate timeouts and headers."""
+        """Execute HTTP request with appropriate timeouts, headers, and bounded retry."""
         headers = {
             "User-Agent": USER_AGENT,
             "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
         }
-        try:
-            if self._external_client:
-                response = await self._external_client.get(
-                    feed_url,
-                    headers=headers,
-                    timeout=timeout_seconds,
-                    follow_redirects=True,
-                )
-            else:
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(
+        max_attempts = 2
+        for attempt in range(1, max_attempts + 1):
+            try:
+                if self._external_client:
+                    response = await self._external_client.get(
                         feed_url,
                         headers=headers,
                         timeout=timeout_seconds,
                         follow_redirects=True,
                     )
-            response.raise_for_status()
-            return response.text
-        except httpx.TimeoutException as exc:
-            logger.warning(f"Timeout fetching feed {feed_url}: {exc}")
-            raise FeedFetchError(f"Timeout fetching feed: {feed_url}") from exc
-        except (httpx.HTTPStatusError, httpx.RequestError) as exc:
-            logger.warning(f"HTTP/Network error fetching feed {feed_url}: {exc}")
-            raise FeedFetchError(f"HTTP error fetching feed {feed_url}: {exc}") from exc
-        except Exception as exc:
-            logger.error(f"Unexpected error fetching feed {feed_url}: {exc}")
-            raise FeedFetchError(f"Failed to fetch feed {feed_url}: {exc}") from exc
+                else:
+                    async with httpx.AsyncClient() as client:
+                        response = await client.get(
+                            feed_url,
+                            headers=headers,
+                            timeout=timeout_seconds,
+                            follow_redirects=True,
+                        )
+                response.raise_for_status()
+                return response.text
+            except httpx.HTTPStatusError as exc:
+                # 4xx client errors should NOT be retried
+                if 400 <= exc.response.status_code < 500:
+                    logger.warning(
+                        f"HTTP {exc.response.status_code} client error fetching feed {feed_url}: {exc}"
+                    )
+                    raise FeedFetchError(
+                        f"HTTP {exc.response.status_code} fetching feed {feed_url}: {exc}"
+                    ) from exc
+                # 5xx server errors can be retried if attempts remain
+                if attempt == max_attempts:
+                    logger.warning(
+                        f"HTTP {exc.response.status_code} error fetching feed {feed_url} after {max_attempts} attempts: {exc}"
+                    )
+                    raise FeedFetchError(f"HTTP error fetching feed {feed_url}: {exc}") from exc
+                await asyncio.sleep(0.1)
+            except (httpx.TimeoutException, httpx.RequestError) as exc:
+                if attempt == max_attempts:
+                    logger.warning(
+                        f"Network error fetching feed {feed_url} after {max_attempts} attempts: {exc}"
+                    )
+                    raise FeedFetchError(f"Failed to fetch feed {feed_url}: {exc}") from exc
+                await asyncio.sleep(0.1)
+            except Exception as exc:
+                logger.error(f"Unexpected error fetching feed {feed_url}: {exc}")
+                raise FeedFetchError(f"Failed to fetch feed {feed_url}: {exc}") from exc
+        raise FeedFetchError(f"Failed to fetch feed {feed_url} after {max_attempts} attempts")
 
     def _parse_feed_xml(self, xml_text: str, feed_url: str) -> list[RawFeedEntry]:
         """Parse raw XML into list of RawFeedEntry objects."""

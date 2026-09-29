@@ -1,14 +1,16 @@
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
-from app.core.timezone import get_today_date, now_in_timezone
+from app.core.timezone import get_timezone, now_in_timezone, now_utc, to_utc
+from app.models.news import DailyEdition
 from app.models.scheduled_job import ScheduledJob
+from app.models.user_preference import UserPreference
 from app.services.goal_instance_service import GoalInstanceService
 from app.services.news.daily_job import DailyNewsJobService
 from app.services.reminder_service import ReminderService
@@ -19,7 +21,7 @@ logger = logging.getLogger("your_little_world.scheduler")
 class GardenScheduler:
     """
     Lightweight, observable background scheduler for recurring goal instances,
-    reminder processing, and 8 PM Asia/Kolkata Faraway Window news editions.
+    reminder processing, and Faraway Window news editions.
     Idempotent and safe to run in-process without external message queues.
     """
 
@@ -37,17 +39,145 @@ class GardenScheduler:
         self._task: asyncio.Task | None = None
         self._running = False
 
+    async def _check_and_run_daily_news(
+        self,
+        db: AsyncSession,
+        as_of: datetime | None = None,
+        user_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Evaluates daily news edition schedules based on user preferences.
+        - Defaults to Asia/Kolkata and 20:00 when no user preferences exist.
+        - Supports user-configured timezone and update times.
+        - Handles same-day and yesterday missed-job catch-up without aggressive backfill.
+        - Enforces idempotency, active job locking, and failure backoff with max retry limits.
+        """
+        stmt = select(UserPreference).where(UserPreference.news_daily_update.is_(True))
+        if user_id:
+            stmt = stmt.where(UserPreference.user_id == user_id)
+        user_prefs = (await db.execute(stmt)).scalars().all()
+
+        schedules: list[tuple[str, str]] = []
+        if user_prefs:
+            seen_pairs: set[tuple[str, str]] = set()
+            for p in user_prefs:
+                tz_name = (p.timezone or "Asia/Kolkata").strip()
+                update_time = (p.news_update_time or "20:00").strip()
+                pair = (tz_name, update_time)
+                if pair not in seen_pairs:
+                    seen_pairs.add(pair)
+                    schedules.append(pair)
+        else:
+            schedules.append(("Asia/Kolkata", "20:00"))
+
+        executed_results: list[dict[str, Any]] = []
+        current_utc = to_utc(as_of) if as_of else now_utc()
+
+        for tz_name, update_time_str in schedules:
+            try:
+                parts = update_time_str.split(":", 1)
+                sched_hour = int(parts[0])
+                sched_minute = int(parts[1]) if len(parts) > 1 else 0
+            except Exception:
+                sched_hour, sched_minute = 20, 0
+
+            tz = get_timezone(tz_name)
+            if as_of:
+                local_now = as_of.astimezone(tz) if as_of.tzinfo else as_of.replace(tzinfo=tz)
+            else:
+                local_now = now_in_timezone(tz_name)
+
+            today_date = local_now.date()
+            is_due_today = (local_now.hour > sched_hour) or (
+                local_now.hour == sched_hour and local_now.minute >= sched_minute
+            )
+
+            target_dates: list[Any] = []
+            if is_due_today:
+                target_dates.append(today_date)
+
+            # Check missed job for yesterday (bounded catch-up: at most 1 day)
+            yesterday_date = today_date - timedelta(days=1)
+            stmt_yest_ed = select(DailyEdition).where(DailyEdition.edition_date == yesterday_date)
+            yest_edition = (await db.execute(stmt_yest_ed)).scalars().first()
+            if not yest_edition:
+                job_name_yest = f"daily_news_edition_{yesterday_date.isoformat()}"
+                stmt_yest_job = select(ScheduledJob).where(
+                    ScheduledJob.job_name == job_name_yest,
+                    ScheduledJob.status == "success",
+                )
+                yest_job = (await db.execute(stmt_yest_job)).scalars().first()
+                if not yest_job and yesterday_date not in target_dates:
+                    target_dates.append(yesterday_date)
+
+            for target_date in target_dates:
+                job_name = f"daily_news_edition_{target_date.isoformat()}"
+
+                # Query existing jobs for this target date
+                stmt_jobs = (
+                    select(ScheduledJob)
+                    .where(ScheduledJob.job_name == job_name)
+                    .order_by(desc(ScheduledJob.started_at))
+                )
+                jobs = (await db.execute(stmt_jobs)).scalars().all()
+
+                # 1. Skip if already succeeded
+                if any(j.status == "success" for j in jobs):
+                    continue
+
+                # 2. Skip if active execution in progress (started within 10 minutes)
+                running_job = next((j for j in jobs if j.status == "running"), None)
+                if running_job:
+                    started = to_utc(running_job.started_at)
+                    if (current_utc - started).total_seconds() < 600:
+                        logger.info(
+                            f"Daily news job '{job_name}' currently running; skipping duplicate trigger."
+                        )
+                        continue
+
+                # 3. Check retry limits (max 3 failed attempts) and backoff (300 seconds)
+                failed_jobs = [j for j in jobs if j.status == "failed"]
+                if len(failed_jobs) >= 3:
+                    logger.warning(
+                        f"Daily news job '{job_name}' reached maximum retry attempts ({len(failed_jobs)}); skipping automatic retry."
+                    )
+                    continue
+
+                if failed_jobs:
+                    last_failure = failed_jobs[0]
+                    failure_time = to_utc(last_failure.completed_at or last_failure.started_at)
+                    elapsed = (current_utc - failure_time).total_seconds()
+                    if elapsed < 300:
+                        logger.debug(
+                            f"Daily news job '{job_name}' backoff active ({int(elapsed)}s < 300s); waiting before retry."
+                        )
+                        continue
+
+                # Run job
+                logger.info(
+                    f"Executing daily news update for target date '{target_date.isoformat()}' (timezone: {tz_name})."
+                )
+                res = await self.daily_news_job_service.execute_daily_update(
+                    db=db,
+                    target_timezone=tz_name,
+                    target_date=target_date,
+                    as_of=as_of,
+                )
+                executed_results.append(res)
+
+        return executed_results
+
     async def run_jobs(
         self,
         db: AsyncSession,
         as_of: datetime | None = None,
+        user_id: str | None = None,
     ) -> dict[str, Any]:
         """
         Executes a single scheduled pass:
         1. Generates due occurrences for all active recurring goals.
         2. Processes and delivers due reminders.
-        3. If 8 PM Asia/Kolkata has arrived and daily edition has not yet executed,
-           curates and publishes today's Faraway Window edition.
+        3. Evaluates and executes scheduled Faraway Window daily news editions.
         Returns execution summary.
         """
         logger.debug("World scheduler starting job pass...")
@@ -61,7 +191,9 @@ class GardenScheduler:
         try:
             # 1. Goal instances & reminders
             instances = await self.instance_service.generate_due_instances(db, as_of=as_of)
-            reminders_count = await self.reminder_service.process_due_reminders(db, as_of=as_of)
+            reminders_count = await self.reminder_service.process_due_reminders(
+                db, as_of=as_of, user_id=user_id
+            )
             summary["instances_generated"] = len(instances)
             summary["reminders_processed"] = reminders_count
 
@@ -71,30 +203,15 @@ class GardenScheduler:
                     f"{reminders_count} reminders dispatched."
                 )
 
-            # 2. 8 PM Asia/Kolkata Faraway Window Daily News Check
+            # 2. Daily News Check & Catch-up
             try:
-                kolkata_now = now_in_timezone("Asia/Kolkata")
-                today_kolkata = get_today_date("Asia/Kolkata")
-                job_name = f"daily_news_edition_{today_kolkata.isoformat()}"
-
-                # Only run if 8 PM (20:00) or later
-                if kolkata_now.hour >= 20:
-                    # Check if already succeeded today
-                    stmt = select(ScheduledJob).where(
-                        ScheduledJob.job_name == job_name,
-                        ScheduledJob.status == "success",
-                    )
-                    existing = (await db.execute(stmt)).scalars().first()
-                    if not existing:
-                        logger.info(
-                            f"8 PM Asia/Kolkata reached ({kolkata_now.strftime('%H:%M')}). "
-                            f"Initiating daily news edition curation..."
-                        )
-                        job_result = await self.daily_news_job_service.execute_daily_update(
-                            db, target_timezone="Asia/Kolkata"
-                        )
-                        summary["news_daily_job_executed"] = True
-                        summary["news_daily_job_result"] = job_result
+                news_results = await self._check_and_run_daily_news(
+                    db, as_of=as_of, user_id=user_id
+                )
+                if news_results:
+                    summary["news_daily_job_executed"] = True
+                    summary["news_daily_job_result"] = news_results[0]
+                    summary["news_daily_job_results"] = news_results
             except Exception as news_err:
                 logger.warning(
                     f"Scheduler encountered non-fatal error during daily news check: {news_err}",

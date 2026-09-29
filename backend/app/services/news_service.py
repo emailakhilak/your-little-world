@@ -198,9 +198,15 @@ class NewsService:
         self,
         db: AsyncSession,
         target_timezone: str = "Asia/Kolkata",
+        target_date: date | None = None,
+        force: bool = False,
+        as_of: Any | None = None,
     ) -> dict[str, Any]:
         """Run daily news ingestion and edition curation pass."""
         return await self.daily_job_service.execute_daily_update(
             db=db,
             target_timezone=target_timezone,
+            target_date=target_date,
+            force=force,
+            as_of=as_of,
         )

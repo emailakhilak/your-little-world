@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import UserClaims, get_current_user
+from app.core.timezone import get_today_date
 from app.schemas.news import (
     DailyEditionListResponse,
     DailyEditionResponse,
@@ -19,11 +20,13 @@ from app.schemas.news import (
     UserArticleReadResponse,
 )
 from app.services.news_service import NewsService
+from app.services.preferences_service import PreferencesService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 news_service = NewsService()
+preferences_service = PreferencesService()
 
 
 @router.get(
@@ -180,9 +183,13 @@ async def get_today_edition(
     current_user: UserClaims = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DailyEditionResponse:
-    """Curate or fetch today's Faraway Window daily edition (Asia/Kolkata timezone)."""
+    """Curate or fetch today's Faraway Window daily edition (user configured timezone or Asia/Kolkata)."""
+    pref = await preferences_service.get_preferences(db, current_user.user_id)
+    user_tz = pref.timezone or "Asia/Kolkata"
+    today_date = get_today_date(user_tz)
     edition = await news_service.get_or_create_today_edition(
         db=db,
+        target_date=today_date,
         force_regenerate=force_regenerate,
     )
     return DailyEditionResponse.model_validate(edition)
@@ -249,12 +256,24 @@ async def generate_edition(
     summary="Run 8 PM daily news update job",
 )
 async def run_daily_job(
-    timezone: str = Query(default="Asia/Kolkata", description="Target timezone"),
+    timezone: str | None = Query(
+        default=None,
+        description="Target timezone (defaults to user preference or Asia/Kolkata)",
+    ),
+    force: bool = Query(default=False, description="Force run even if already completed today"),
     current_user: UserClaims = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Manually invoke the 8 PM daily news update workflow."""
-    return await news_service.run_daily_update_job(db=db, target_timezone=timezone)
+    target_tz = timezone
+    if not target_tz:
+        pref = await preferences_service.get_preferences(db, current_user.user_id)
+        target_tz = pref.timezone or "Asia/Kolkata"
+    return await news_service.run_daily_update_job(
+        db=db,
+        target_timezone=target_tz,
+        force=force,
+    )
 
 
 @router.get(
