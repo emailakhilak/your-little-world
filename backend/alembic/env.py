@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 from app.core.config import settings
+from app.core.database import normalize_database_url
 from app.models import Base
 
 # this is the Alembic Config object, which provides
@@ -19,12 +20,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Set database URL dynamically from Pydantic Settings
-db_url = settings.DATABASE_URL
-if db_url.startswith("postgres://"):
-    db_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
-elif db_url.startswith("postgresql://") and not db_url.startswith("postgresql+"):
-    db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
-
+db_url = normalize_database_url(settings.DATABASE_URL)
 config.set_main_option("sqlalchemy.url", db_url)
 
 # Add your model's MetaData object here for 'autogenerate' support

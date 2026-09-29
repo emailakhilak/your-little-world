@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import ReturnButton from "@/components/ui/ReturnButton";
 import { fetchUserPreferences, updateUserPreferences } from "@/lib/api";
+import AccountSection from "@/components/world/AccountSection";
 
 const TIMEZONES = [
   { value: "Asia/Kolkata", label: "Asia/Kolkata (IST, UTC+5:30) [Default]" },
@@ -215,6 +216,9 @@ export default function SettingsPage() {
                 />
               </div>
             </div>
+
+            {/* Account & Identity */}
+            <AccountSection />
 
             {statusMessage && (
               <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-800/40 text-emerald-300 text-xs text-center font-sans">

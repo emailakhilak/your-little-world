@@ -1,4 +1,4 @@
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,11 +18,16 @@ class Settings(BaseSettings):
     # Database
     # Default to local SQLite for tests/offline, override with Supabase PostgreSQL in .env
     DATABASE_URL: str = "sqlite+aiosqlite:///./test.db"
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 10
+    DB_POOL_RECYCLE: int = 1800
+    DB_POOL_TIMEOUT: int = 30
 
     # Supabase Auth
     SUPABASE_URL: str = ""
     SUPABASE_ANON_KEY: str = ""
     SUPABASE_JWT_SECRET: str = ""
+    SUPABASE_JWT_ALGORITHM: str = "HS256"
 
     # Timezone
     DEFAULT_TIMEZONE: str = "Asia/Kolkata"
@@ -43,6 +48,14 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3000",
     ]
 
+    @property
+    def is_production(self) -> bool:
+        return self.ENVIRONMENT.lower() in ("production", "prod")
+
+    @property
+    def is_development(self) -> bool:
+        return not self.is_production
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def assemble_cors_origins(cls, v: str | list[str]) -> list[str]:
@@ -51,6 +64,15 @@ class Settings(BaseSettings):
         elif isinstance(v, list):
             return v
         return ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+    @model_validator(mode="after")
+    def validate_production_configuration(self) -> "Settings":
+        if self.is_production:
+            if not self.SUPABASE_JWT_SECRET or not self.SUPABASE_JWT_SECRET.strip():
+                raise ValueError(
+                    "SUPABASE_JWT_SECRET is required when ENVIRONMENT is set to production."
+                )
+        return self
 
 
 settings = Settings()

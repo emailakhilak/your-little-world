@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { fetchUserPreferences, updateUserPreferences } from "@/lib/api";
+import AccountSection from "@/components/world/AccountSection";
 
 const TIMEZONES = [
   { value: "Asia/Kolkata", label: "Asia/Kolkata (IST, UTC+5:30) [Default]" },
@@ -211,6 +212,9 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 />
               </div>
             </div>
+
+            {/* Account & Identity */}
+            <AccountSection />
 
             {statusMessage && (
               <div className="p-2.5 rounded-xl bg-emerald-950/60 border border-emerald-800/40 text-emerald-300 text-[11px] text-center">
