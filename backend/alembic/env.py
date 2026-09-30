@@ -21,7 +21,7 @@ if config.config_file_name is not None:
 
 # Set database URL dynamically from Pydantic Settings
 db_url = normalize_database_url(settings.DATABASE_URL)
-config.set_main_option("sqlalchemy.url", db_url)
+config.set_main_option("sqlalchemy.url", db_url.replace("%", "%%"))
 
 # Add your model's MetaData object here for 'autogenerate' support
 target_metadata = Base.metadata
