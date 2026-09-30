@@ -33,10 +33,13 @@ class Settings(BaseSettings):
     DEFAULT_TIMEZONE: str = "Asia/Kolkata"
 
     # LLM Settings
-    LLM_PROVIDER: str = "mock"  # "mock", "gemini", "openai", "anthropic", "none"
+    LLM_PROVIDER: str = "mock"  # "mock", "gemini", "openai", "none"
     GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-1.5-flash"
     OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4o-mini"
     ANTHROPIC_API_KEY: str = ""
+    LLM_TIMEOUT: float = 30.0
 
     # Notification Settings
     NOTIFICATION_PROVIDER: str = "log"  # "log", "webhook"
@@ -72,6 +75,21 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "SUPABASE_JWT_SECRET is required when ENVIRONMENT is set to production."
                 )
+        return self
+
+    @model_validator(mode="after")
+    def validate_llm_configuration(self) -> "Settings":
+        provider = (self.LLM_PROVIDER or "mock").lower().strip()
+        if provider == "gemini":
+            if not self.GEMINI_API_KEY or not self.GEMINI_API_KEY.strip():
+                raise ValueError("GEMINI_API_KEY is required when LLM_PROVIDER is set to 'gemini'.")
+        elif provider == "openai":
+            if not self.OPENAI_API_KEY or not self.OPENAI_API_KEY.strip():
+                raise ValueError("OPENAI_API_KEY is required when LLM_PROVIDER is set to 'openai'.")
+        elif provider not in ("mock", "gemini", "openai", "anthropic", "none", "disabled", "false"):
+            raise ValueError(
+                f"Unknown LLM_PROVIDER '{self.LLM_PROVIDER}'. Supported providers: 'mock', 'gemini', 'openai', 'none'."
+            )
         return self
 
 

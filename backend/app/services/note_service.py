@@ -83,7 +83,10 @@ class NoteService:
         AI Foundation: Proposes categorizations and tags for notes.
         Falls back to rule-based heuristics if no provider is configured.
         """
-        provider = get_llm_provider()
+        try:
+            provider = get_llm_provider()
+        except Exception:
+            provider = None
         if not provider:
             # Heuristic fallback
             tags = ["note"]
@@ -116,5 +119,7 @@ class NoteService:
                 suggested_tags=result.suggested_tags,
             )
         except Exception as e:
-            logger.warning(f"AI tag suggestion failed, using fallback: {e}")
+            logger.warning(
+                "AI tag suggestion failed (%s), using fallback heuristic.", type(e).__name__
+            )
             return NoteAISuggestionResponse(suggested_category="idea", suggested_tags=["note"])

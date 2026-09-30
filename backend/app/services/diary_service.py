@@ -76,7 +76,15 @@ class DiaryService:
         """
         entry = await self.get_entry_or_404(db, user_id=user_id, entry_id=entry_id)
 
-        provider = get_llm_provider()
+        try:
+            provider = get_llm_provider()
+        except Exception as e:
+            logger.warning("LLM provider misconfigured for diary reflection: %s", type(e).__name__)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="LLM provider is not configured. Reflection requires a configured provider.",
+            ) from e
+
         if not provider:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -112,7 +120,7 @@ class DiaryService:
                 gentle_questions=reflection_schema.gentle_questions,
             )
         except Exception as e:
-            logger.warning(f"Diary reflection failed: {e}")
+            logger.warning("Diary reflection failed for entry %s: %s", entry_id, type(e).__name__)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Could not generate reflection at this time.",

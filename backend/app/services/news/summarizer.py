@@ -28,7 +28,19 @@ class NewsSummarizerService:
         if article.summary_status == "completed" and not force:
             return article
 
-        provider = get_llm_provider()
+        try:
+            provider = get_llm_provider()
+        except Exception as e:
+            logger.warning(
+                "LLM provider misconfigured; skipping summary for article %s: %s",
+                article.id,
+                type(e).__name__,
+            )
+            article.summary_status = "unconfigured"
+            await db.commit()
+            await db.refresh(article)
+            return article
+
         if not provider:
             logger.info(f"LLM provider unconfigured; skipping summary for article {article.id}")
             article.summary_status = "unconfigured"
@@ -62,7 +74,9 @@ class NewsSummarizerService:
             article.summary_status = "completed"
             article.summary_provider = provider.provider_name
         except Exception as e:
-            logger.warning(f"Failed to generate summary for article {article.id}: {e}")
+            logger.warning(
+                "Failed to generate summary for article %s: %s", article.id, type(e).__name__
+            )
             article.summary_status = "failed"
 
         await db.commit()
