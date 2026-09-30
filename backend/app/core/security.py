@@ -1,18 +1,74 @@
+import logging
+from typing import Any
+
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jwt import PyJWKClient
 from pydantic import BaseModel
 
 from app.core.config import settings
 
+logger = logging.getLogger("your_little_world.security")
+
 bearer_scheme = HTTPBearer(auto_error=False)
+
+# Cached JWKS clients keyed by JWKS URL
+_jwks_clients: dict[str, PyJWKClient] = {}
+
+
+def get_jwks_client(jwks_url: str) -> PyJWKClient:
+    """Returns or creates a cached PyJWKClient instance for an asymmetric JWKS endpoint."""
+    if jwks_url not in _jwks_clients:
+        _jwks_clients[jwks_url] = PyJWKClient(jwks_url, cache_jwk_set=True, lifespan=3600)
+    return _jwks_clients[jwks_url]
 
 
 class UserClaims(BaseModel):
     user_id: str
     email: str | None = None
     role: str | None = "authenticated"
-    raw_claims: dict = {}
+    raw_claims: dict[str, Any] = {}
+
+
+def decode_jwt_token(token: str) -> dict[str, Any]:
+    """
+    Decodes and cryptographically verifies a JWT token.
+    Supports:
+    - Standard symmetric HS256 using SUPABASE_JWT_SECRET (default Supabase dashboard secret)
+    - Asymmetric algorithms (RS256, ES256) via JWKS endpoint (SUPABASE_JWKS_URL or SUPABASE_URL)
+    """
+    algorithm = (settings.SUPABASE_JWT_ALGORITHM or "HS256").upper()
+    is_asymmetric = algorithm.startswith(("RS", "ES", "PS")) or bool(settings.SUPABASE_JWKS_URL)
+
+    if is_asymmetric:
+        jwks_url = settings.SUPABASE_JWKS_URL
+        if not jwks_url and settings.SUPABASE_URL:
+            jwks_url = f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1/.well-known/jwks.json"
+
+        if not jwks_url:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="SUPABASE_JWKS_URL or SUPABASE_URL is required for asymmetric JWT verification",
+            )
+
+        client = get_jwks_client(jwks_url)
+        signing_key = client.get_signing_key_from_jwt(token)
+        key = signing_key.key
+    else:
+        if not settings.SUPABASE_JWT_SECRET or not settings.SUPABASE_JWT_SECRET.strip():
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="SUPABASE_JWT_SECRET is not configured on the server",
+            )
+        key = settings.SUPABASE_JWT_SECRET
+
+    return jwt.decode(
+        token,
+        key,
+        algorithms=[algorithm],
+        options={"verify_aud": False},
+    )
 
 
 async def get_current_user(
@@ -22,18 +78,19 @@ async def get_current_user(
     Validates authentication token from Authorization Bearer header.
 
     In production mode:
-    - Requires configured SUPABASE_JWT_SECRET.
-    - Strictly verifies Supabase HS256/configured JWT signature.
+    - Requires configured JWT verification credentials (secret or JWKS).
+    - Strictly verifies cryptographic signature (HS256 or RS256/ES256 via JWKS).
     - Rejects expired, malformed, or untrusted tokens.
     - Rejects anonymous tokens (role: 'anon').
     - Rejects tokens with missing or empty subject ('sub') claim.
     - Never accepts development/test tokens or unverified payloads.
+    - Never logs tokens or sensitive headers.
 
     In development mode:
-    - If SUPABASE_JWT_SECRET is configured, verifies valid signed JWTs.
+    - If JWT verification credentials are configured, verifies valid signed JWTs.
     - If token is a development/test token (e.g. dev-*, test-*, dev-user),
       derives authenticated developer identity.
-    - If SUPABASE_JWT_SECRET is unset, permits unverified JWT inspection for testing.
+    - If credentials are unset, permits unverified JWT inspection for local offline testing.
     """
     if not credentials:
         raise HTTPException(
@@ -54,29 +111,22 @@ async def get_current_user(
     # Production Authentication Enforcement
     # -------------------------------------------------------------
     if settings.is_production:
-        if not settings.SUPABASE_JWT_SECRET:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="SUPABASE_JWT_SECRET is not configured on the server",
-            )
-
         try:
-            payload = jwt.decode(
-                token,
-                settings.SUPABASE_JWT_SECRET,
-                algorithms=[settings.SUPABASE_JWT_ALGORITHM],
-                options={"verify_aud": False},
-            )
+            payload = decode_jwt_token(token)
+        except HTTPException:
+            # Re-raise explicit 500 server configuration HTTPExceptions
+            raise
         except jwt.ExpiredSignatureError as e:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token has expired",
                 headers={"WWW-Authenticate": "Bearer"},
             ) from e
-        except jwt.PyJWTError as e:
+        except Exception as e:
+            logger.warning("Token verification failed: %s", type(e).__name__)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Invalid authentication token: {str(e)}",
+                detail="Invalid authentication token",
                 headers={"WWW-Authenticate": "Bearer"},
             ) from e
 
@@ -108,15 +158,14 @@ async def get_current_user(
     # -------------------------------------------------------------
     # Development / Test Authentication Fallback
     # -------------------------------------------------------------
-    # 1. If SUPABASE_JWT_SECRET is configured in development, try verifying first
-    if settings.SUPABASE_JWT_SECRET:
+    # 1. If configured in development, try verifying first
+    if (
+        settings.SUPABASE_JWT_SECRET
+        or settings.SUPABASE_JWKS_URL
+        or settings.SUPABASE_JWT_ALGORITHM.upper().startswith(("RS", "ES", "PS"))
+    ):
         try:
-            payload = jwt.decode(
-                token,
-                settings.SUPABASE_JWT_SECRET,
-                algorithms=[settings.SUPABASE_JWT_ALGORITHM],
-                options={"verify_aud": False},
-            )
+            payload = decode_jwt_token(token)
             user_id = payload.get("sub")
             if user_id and isinstance(user_id, str) and user_id.strip():
                 role = payload.get("role", "authenticated")
@@ -133,8 +182,8 @@ async def get_current_user(
                 detail="Token has expired",
                 headers={"WWW-Authenticate": "Bearer"},
             ) from e
-        except jwt.PyJWTError:
-            # Not a signed JWT; allow dev/test fallback below in dev mode
+        except Exception:
+            # Not a signed JWT or invalid signature; allow dev/test fallback below in dev mode
             pass
 
     # 2. Check for explicit dev / test tokens

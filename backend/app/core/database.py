@@ -112,17 +112,18 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def check_db_connection() -> dict:
-    """Performs a lightweight query to verify database connectivity."""
+    """Performs a lightweight query to verify database connectivity without leaking credentials."""
     try:
         async with AsyncSessionLocal() as session:
             await session.execute(text("SELECT 1"))
             return {
                 "status": "connected",
-                "dialect": engine.dialect.name,
+                "dialect": engine.dialect.name if hasattr(engine, "dialect") else "unknown",
             }
     except Exception as exc:
-        logger.warning(f"Database health check failed: {exc}")
+        logger.warning("Database health check failed: %s", type(exc).__name__)
         return {
             "status": "disconnected",
-            "error": str(exc),
+            "dialect": engine.dialect.name if hasattr(engine, "dialect") else "unknown",
+            "error": "Database query failed",
         }

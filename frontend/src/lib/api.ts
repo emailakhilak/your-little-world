@@ -124,8 +124,37 @@ export interface ReminderUpdateInput {
   channel?: string;
 }
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+export interface LivenessCheckResponse {
+  status: string;
+  app_name: string;
+  environment: string;
+}
+
+export interface ReadinessCheckResponse {
+  status: string;
+  database: string;
+  dialect: string;
+}
+
+/**
+ * Normalizes backend API URL by:
+ * - Stripping any trailing slashes
+ * - Ensuring the '/api/v1' prefix is appended if omitted in configuration
+ */
+export function normalizeApiBaseUrl(rawUrl?: string): string {
+  const url = (
+    rawUrl ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    "http://localhost:8000/api/v1"
+  ).trim();
+  const clean = url.replace(/\/+$/, "");
+  if (!clean.endsWith("/api/v1") && !clean.includes("/api/")) {
+    return `${clean}/api/v1`;
+  }
+  return clean;
+}
+
+const API_BASE_URL = normalizeApiBaseUrl();
 
 /**
  * Retrieves the current authentication bearer token.
@@ -155,6 +184,42 @@ export async function getAuthToken(): Promise<string> {
   }
 
   return "dev-user";
+}
+
+/**
+ * Pings the backend liveness probe.
+ */
+export async function getBackendLiveness(): Promise<LivenessCheckResponse> {
+  const res = await fetch(`${API_BASE_URL}/health/live`, {
+    cache: "no-store",
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Liveness probe returned HTTP ${res.status}: ${res.statusText}`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Pings the backend readiness probe.
+ */
+export async function getBackendReadiness(): Promise<ReadinessCheckResponse> {
+  const res = await fetch(`${API_BASE_URL}/health/ready`, {
+    cache: "no-store",
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Readiness probe returned HTTP ${res.status}: ${res.statusText}`);
+  }
+
+  return res.json();
 }
 
 /**

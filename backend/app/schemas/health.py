@@ -9,6 +9,20 @@ class DatabaseStatus(BaseModel):
     error: str = Field(default="")
 
 
+class LivenessResponse(BaseModel):
+    status: str = Field(default="alive", description="Process liveness state ('alive')")
+    app_name: str
+    environment: str
+
+
+class ReadinessResponse(BaseModel):
+    status: str = Field(..., description="Service readiness state ('ready' or 'not_ready')")
+    database: str = Field(
+        ..., description="Database connectivity state ('connected' or 'disconnected')"
+    )
+    dialect: str = Field(default="unknown", description="Database dialect name")
+
+
 class HealthResponse(BaseModel):
     status: str = "healthy"
     app_name: str

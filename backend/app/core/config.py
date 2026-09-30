@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     SUPABASE_ANON_KEY: str = ""
     SUPABASE_JWT_SECRET: str = ""
     SUPABASE_JWT_ALGORITHM: str = "HS256"
+    SUPABASE_JWKS_URL: str = ""
+
+    # Scheduler Settings
+    # Can be set to False on auxiliary web workers if running multiple uvicorn processes
+    ENABLE_SCHEDULER: bool = True
 
     # Timezone
     DEFAULT_TIMEZONE: str = "Asia/Kolkata"
@@ -62,19 +67,52 @@ class Settings(BaseSettings):
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def assemble_cors_origins(cls, v: str | list[str]) -> list[str]:
-        if isinstance(v, str) and not v.startswith("["):
-            return [i.strip() for i in v.split(",")]
+        if isinstance(v, str):
+            v_stripped = v.strip()
+            if v_stripped.startswith("[") and v_stripped.endswith("]"):
+                import json
+
+                try:
+                    parsed = json.loads(v_stripped)
+                    if isinstance(parsed, list):
+                        return [str(item).strip() for item in parsed if str(item).strip()]
+                except Exception:
+                    pass
+            return [i.strip() for i in v_stripped.split(",") if i.strip()]
         elif isinstance(v, list):
-            return v
+            return [str(i).strip() for i in v if str(i).strip()]
         return ["http://localhost:3000", "http://127.0.0.1:3000"]
 
     @model_validator(mode="after")
     def validate_production_configuration(self) -> "Settings":
         if self.is_production:
-            if not self.SUPABASE_JWT_SECRET or not self.SUPABASE_JWT_SECRET.strip():
+            # 1. JWT verification credentials check
+            algorithm = (self.SUPABASE_JWT_ALGORITHM or "HS256").upper()
+            is_asymmetric = algorithm.startswith(("RS", "ES", "PS")) or bool(self.SUPABASE_JWKS_URL)
+
+            if is_asymmetric:
+                if not self.SUPABASE_JWKS_URL and not self.SUPABASE_URL:
+                    raise ValueError(
+                        "SUPABASE_JWKS_URL or SUPABASE_URL is required when using asymmetric "
+                        "JWT algorithms in production."
+                    )
+            else:
+                if not self.SUPABASE_JWT_SECRET or not self.SUPABASE_JWT_SECRET.strip():
+                    raise ValueError(
+                        "SUPABASE_JWT_SECRET is required when ENVIRONMENT is set to production."
+                    )
+
+            # 2. CORS configuration check (no wildcards allowed with credentials)
+            if "*" in self.CORS_ORIGINS:
                 raise ValueError(
-                    "SUPABASE_JWT_SECRET is required when ENVIRONMENT is set to production."
+                    "Wildcard CORS origins ('*') are strictly disallowed in production "
+                    "when allow_credentials=True."
                 )
+            if not self.CORS_ORIGINS:
+                raise ValueError(
+                    "At least one explicit CORS origin must be configured in production."
+                )
+
         return self
 
     @model_validator(mode="after")
