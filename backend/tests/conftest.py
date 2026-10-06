@@ -1,7 +1,14 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.core.database import engine
 from app.main import app
+
+
+@pytest.fixture(autouse=True)
+async def cleanup_db_connections():
+    yield
+    await engine.dispose()
 
 
 @pytest.fixture

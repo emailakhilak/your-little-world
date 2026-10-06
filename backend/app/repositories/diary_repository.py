@@ -37,9 +37,17 @@ class DiaryRepository:
             existing.content = data.content.strip()
             if data.mood is not None:
                 existing.mood = data.mood
+            if data.entry_time is not None:
+                current_refl = dict(existing.reflection_json) if existing.reflection_json else {}
+                current_refl["entry_time"] = data.entry_time.strip()
+                existing.reflection_json = current_refl
             await db.commit()
             await db.refresh(existing)
             return existing
+
+        reflection = None
+        if data.entry_time is not None:
+            reflection = {"entry_time": data.entry_time.strip()}
 
         entry = DiaryEntry(
             user_id=user_id,
@@ -47,6 +55,7 @@ class DiaryRepository:
             title=data.title.strip() if data.title else None,
             content=data.content.strip(),
             mood=data.mood,
+            reflection_json=reflection,
         )
         db.add(entry)
         await db.commit()
@@ -62,6 +71,10 @@ class DiaryRepository:
             entry.content = data.content.strip()
         if data.mood is not None:
             entry.mood = data.mood
+        if data.entry_time is not None:
+            current_refl = dict(entry.reflection_json) if entry.reflection_json else {}
+            current_refl["entry_time"] = data.entry_time.strip()
+            entry.reflection_json = current_refl
 
         await db.commit()
         await db.refresh(entry)
@@ -70,6 +83,9 @@ class DiaryRepository:
     async def save_reflection(
         self, db: AsyncSession, entry: DiaryEntry, reflection_data: dict
     ) -> DiaryEntry:
+        existing_refl = entry.reflection_json or {}
+        if "entry_time" in existing_refl and "entry_time" not in reflection_data:
+            reflection_data["entry_time"] = existing_refl["entry_time"]
         entry.reflection_json = reflection_data
         await db.commit()
         await db.refresh(entry)

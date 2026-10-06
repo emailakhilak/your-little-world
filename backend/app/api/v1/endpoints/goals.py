@@ -7,7 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.scheduler import garden_scheduler
 from app.core.security import UserClaims, get_current_user
-from app.schemas.goal import GoalCreate, GoalListResponse, GoalResponse, GoalUpdate
+from app.schemas.goal import (
+    GoalBulkDeleteRequest,
+    GoalBulkDeleteResponse,
+    GoalCreate,
+    GoalListResponse,
+    GoalResponse,
+    GoalUpdate,
+)
 from app.schemas.goal_instance import (
     GoalInstanceListResponse,
     GoalInstanceResponse,
@@ -113,6 +120,19 @@ async def trigger_scheduler_pass(
 # ---------------------------------------------------------------------------
 # Reminder Endpoints (Static prefixes)
 # ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/reminders",
+    response_model=ReminderListResponse,
+    summary="List all reminders for current user",
+)
+async def list_user_reminders(
+    current_user: UserClaims = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ReminderListResponse:
+    """List all reminders across all goals belonging to the authenticated user."""
+    return await reminder_service.list_user_reminders(db, user_id=current_user.user_id)
 
 
 @router.patch(
@@ -261,6 +281,42 @@ async def archive_goal(
 ) -> GoalResponse:
     """Move a goal to archived status (resting in soil)."""
     return await goal_service.archive_goal(db, goal_id=goal_id, user_id=current_user.user_id)
+
+
+@router.delete(
+    "/bulk",
+    response_model=GoalBulkDeleteResponse,
+    summary="Bulk delete multiple goals in a single transaction",
+)
+async def bulk_delete_goals(
+    data: GoalBulkDeleteRequest,
+    current_user: UserClaims = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> GoalBulkDeleteResponse:
+    """
+    Bulk delete goals strictly belonging to the authenticated user.
+    Executes atomically in one database transaction with single commit.
+    Preserves durable historical achievements.
+    """
+    return await goal_service.bulk_delete_goals(
+        db, user_id=current_user.user_id, goal_ids=data.goal_ids
+    )
+
+
+@router.post(
+    "/bulk-delete",
+    response_model=GoalBulkDeleteResponse,
+    summary="Bulk delete multiple goals (POST alias)",
+)
+async def bulk_delete_goals_post(
+    data: GoalBulkDeleteRequest,
+    current_user: UserClaims = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> GoalBulkDeleteResponse:
+    """POST alias for bulk delete operation."""
+    return await goal_service.bulk_delete_goals(
+        db, user_id=current_user.user_id, goal_ids=data.goal_ids
+    )
 
 
 @router.delete(

@@ -35,11 +35,19 @@ def decode_jwt_token(token: str) -> dict[str, Any]:
     """
     Decodes and cryptographically verifies a JWT token.
     Supports:
-    - Standard symmetric HS256 using SUPABASE_JWT_SECRET (default Supabase dashboard secret)
-    - Asymmetric algorithms (RS256, ES256) via JWKS endpoint (SUPABASE_JWKS_URL or SUPABASE_URL)
+    - Asymmetric algorithms (ES256, RS256) via JWKS endpoint (SUPABASE_JWKS_URL or SUPABASE_URL)
+    - Standard symmetric HS256 using SUPABASE_JWT_SECRET (when configured)
     """
-    algorithm = (settings.SUPABASE_JWT_ALGORITHM or "HS256").upper()
-    is_asymmetric = algorithm.startswith(("RS", "ES", "PS")) or bool(settings.SUPABASE_JWKS_URL)
+    try:
+        header = jwt.get_unverified_header(token)
+        token_alg = (header.get("alg") or "").upper()
+    except Exception:
+        token_alg = ""
+
+    configured_alg = (settings.SUPABASE_JWT_ALGORITHM or "ES256").upper()
+    algorithm = token_alg if token_alg else configured_alg
+
+    is_asymmetric = algorithm.startswith(("RS", "ES", "PS"))
 
     if is_asymmetric:
         jwks_url = settings.SUPABASE_JWKS_URL

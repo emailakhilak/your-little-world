@@ -1,5 +1,7 @@
 # Dependencies
 node_modules/
+mobile/
+.expo/
 .pnp
 .pnp.js
 

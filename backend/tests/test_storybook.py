@@ -85,7 +85,37 @@ async def test_storybook_projects_and_isolation():
         )
         assert resp_bob_ch.status_code == 404
 
-        # 8. Check Overview endpoint
+        # 8. Alice updates her chapter (editing requirement)
+        resp_update = await client.put(
+            f"/api/v1/storybook/chapters/{ch_id}",
+            headers=AUTH_HEADERS_ALICE,
+            json={
+                "title": "The Awakening (Refined)",
+                "description": "Updated narrative of digital sanctuaries.",
+                "period": "Autumn 2026 - Winter 2026",
+                "reflections": "Patience and craft deepen over time.",
+                "milestones": [
+                    {"title": "Phase 1 Complete", "date": "2026-09-27"},
+                    {"title": "Phase 2 Complete", "date": "2026-10-02"},
+                ],
+            },
+        )
+        assert resp_update.status_code == 200
+        updated_data = resp_update.json()
+        assert updated_data["id"] == ch_id
+        assert updated_data["title"] == "The Awakening (Refined)"
+        assert updated_data["period"] == "Autumn 2026 - Winter 2026"
+        assert len(updated_data["milestones"]) == 2
+
+        # 9. Verify Alice's chapter list does NOT duplicate the chapter
+        resp_list_ch = await client.get("/api/v1/storybook/chapters", headers=AUTH_HEADERS_ALICE)
+        assert resp_list_ch.status_code == 200
+        alice_chapters = resp_list_ch.json()["items"]
+        matching = [c for c in alice_chapters if c["id"] == ch_id]
+        assert len(matching) == 1
+        assert matching[0]["title"] == "The Awakening (Refined)"
+
+        # 10. Check Overview endpoint
         resp_overview = await client.get("/api/v1/storybook/overview", headers=AUTH_HEADERS_ALICE)
         assert resp_overview.status_code == 200
         ov = resp_overview.json()

@@ -37,6 +37,16 @@ class ReminderRepository:
         result = await db.execute(query)
         return list(result.scalars().all())
 
+    async def list_by_user(self, db: AsyncSession, user_id: str) -> list[Reminder]:
+        """Fetch all reminders for a user across all goals in a single query."""
+        query = (
+            select(Reminder)
+            .where(Reminder.user_id == user_id)
+            .order_by(Reminder.created_at.asc())
+        )
+        result = await db.execute(query)
+        return list(result.scalars().all())
+
     async def list_all_enabled(
         self, db: AsyncSession, user_id: str | None = None
     ) -> list[Reminder]:

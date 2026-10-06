@@ -89,3 +89,15 @@ class GoalListResponse(BaseModel):
     active_count: int
     completed_count: int
     archived_count: int
+
+
+class GoalBulkDeleteRequest(BaseModel):
+    goal_ids: list[str] = Field(
+        default_factory=list, description="List of goal IDs to permanently remove"
+    )
+
+
+class GoalBulkDeleteResponse(BaseModel):
+    deleted_count: int
+    deleted_ids: list[str]
+

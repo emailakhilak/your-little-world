@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     SUPABASE_URL: str = ""
     SUPABASE_ANON_KEY: str = ""
     SUPABASE_JWT_SECRET: str = ""
-    SUPABASE_JWT_ALGORITHM: str = "HS256"
+    SUPABASE_JWT_ALGORITHM: str = "ES256"
     SUPABASE_JWKS_URL: str = ""
 
     # Scheduler Settings
@@ -87,8 +87,8 @@ class Settings(BaseSettings):
     def validate_production_configuration(self) -> "Settings":
         if self.is_production:
             # 1. JWT verification credentials check
-            algorithm = (self.SUPABASE_JWT_ALGORITHM or "HS256").upper()
-            is_asymmetric = algorithm.startswith(("RS", "ES", "PS")) or bool(self.SUPABASE_JWKS_URL)
+            algorithm = (self.SUPABASE_JWT_ALGORITHM or "ES256").upper()
+            is_asymmetric = algorithm.startswith(("RS", "ES", "PS"))
 
             if is_asymmetric:
                 if not self.SUPABASE_JWKS_URL and not self.SUPABASE_URL:

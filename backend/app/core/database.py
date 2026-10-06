@@ -46,9 +46,9 @@ def get_connect_args(url: str) -> dict[str, Any]:
     if "sqlite" in url:
         connect_args["check_same_thread"] = False
     elif "postgresql" in url or "asyncpg" in url:
-        # Supabase transaction pooler (port 6543 / pooler.supabase.com)
+        # Supabase transaction/session pooler (port 6543 / 5432 / pooler.supabase.com)
         # requires statement_cache_size=0 with asyncpg to prevent prepared statement errors
-        if ":6543" in url or "pooler.supabase.com" in url or "pgbouncer" in url.lower():
+        if ":6543" in url or ":5432" in url or "pooler.supabase.com" in url or "pgbouncer" in url.lower():
             connect_args["statement_cache_size"] = 0
 
         # Enforce SSL requirement if specified in URL or if remote Supabase host

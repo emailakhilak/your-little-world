@@ -171,3 +171,186 @@ async def test_delete_goal(async_client: AsyncClient):
 
     get_res = await async_client.get(f"/api/v1/goals/{goal_id}", headers=headers)
     assert get_res.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_unauthorized(async_client: AsyncClient):
+    """DELETE /api/v1/goals/bulk without auth token returns 401."""
+    res = await async_client.request(
+        "DELETE", "/api/v1/goals/bulk", json={"goal_ids": ["some-id"]}
+    )
+    assert res.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_goals(async_client: AsyncClient):
+    """DELETE /api/v1/goals/bulk deletes multiple goals in a single request."""
+    headers = {"Authorization": "Bearer test-user-bulk-1"}
+
+    # Create 3 goals
+    g1 = (await async_client.post("/api/v1/goals", json={"title": "Goal 1"}, headers=headers)).json()["id"]
+    g2 = (await async_client.post("/api/v1/goals", json={"title": "Goal 2"}, headers=headers)).json()["id"]
+    g3 = (await async_client.post("/api/v1/goals", json={"title": "Goal 3"}, headers=headers)).json()["id"]
+
+    # Delete 2 of them
+    del_res = await async_client.request(
+        "DELETE",
+        "/api/v1/goals/bulk",
+        json={"goal_ids": [g1, g2]},
+        headers=headers,
+    )
+    assert del_res.status_code == 200
+    del_data = del_res.json()
+    assert del_data["deleted_count"] == 2
+    assert set(del_data["deleted_ids"]) == {g1, g2}
+
+    # Verify g1 and g2 are gone
+    assert (await async_client.get(f"/api/v1/goals/{g1}", headers=headers)).status_code == 404
+    assert (await async_client.get(f"/api/v1/goals/{g2}", headers=headers)).status_code == 404
+
+    # Verify g3 still exists
+    res3 = await async_client.get(f"/api/v1/goals/{g3}", headers=headers)
+    assert res3.status_code == 200
+    assert res3.json()["title"] == "Goal 3"
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_post_alias(async_client: AsyncClient):
+    """POST /api/v1/goals/bulk-delete works as an alias for bulk deletion."""
+    headers = {"Authorization": "Bearer test-user-bulk-post"}
+
+    g1 = (await async_client.post("/api/v1/goals", json={"title": "Post Goal 1"}, headers=headers)).json()["id"]
+    g2 = (await async_client.post("/api/v1/goals", json={"title": "Post Goal 2"}, headers=headers)).json()["id"]
+
+    del_res = await async_client.post(
+        "/api/v1/goals/bulk-delete",
+        json={"goal_ids": [g1, g2]},
+        headers=headers,
+    )
+    assert del_res.status_code == 200
+    assert del_res.json()["deleted_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_user_isolation(async_client: AsyncClient):
+    """A user cannot bulk delete goals belonging to another user."""
+    alice_headers = {"Authorization": "Bearer test-user-alice-bulk"}
+    bob_headers = {"Authorization": "Bearer test-user-bob-bulk"}
+
+    alice_goal = (
+        await async_client.post(
+            "/api/v1/goals", json={"title": "Alice's precious orchid"}, headers=alice_headers
+        )
+    ).json()["id"]
+
+    bob_goal = (
+        await async_client.post(
+            "/api/v1/goals", json={"title": "Bob's common dandelion"}, headers=bob_headers
+        )
+    ).json()["id"]
+
+    # Bob attempts to delete both his goal and Alice's goal
+    bob_del = await async_client.request(
+        "DELETE",
+        "/api/v1/goals/bulk",
+        json={"goal_ids": [alice_goal, bob_goal]},
+        headers=bob_headers,
+    )
+    assert bob_del.status_code == 200
+    del_data = bob_del.json()
+    # Only Bob's goal was deleted!
+    assert del_data["deleted_count"] == 1
+    assert del_data["deleted_ids"] == [bob_goal]
+
+    # Alice's goal is completely untouched and intact
+    alice_check = await async_client.get(f"/api/v1/goals/{alice_goal}", headers=alice_headers)
+    assert alice_check.status_code == 200
+    assert alice_check.json()["title"] == "Alice's precious orchid"
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_empty_list(async_client: AsyncClient):
+    """Empty goal_ids list returns 200 with 0 deleted."""
+    headers = {"Authorization": "Bearer test-user-bulk-empty"}
+    res = await async_client.request(
+        "DELETE", "/api/v1/goals/bulk", json={"goal_ids": []}, headers=headers
+    )
+    assert res.status_code == 200
+    assert res.json()["deleted_count"] == 0
+    assert res.json()["deleted_ids"] == []
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_preserves_durable_achievements(async_client: AsyncClient):
+    """Bulk-deleting goals does NOT delete durable achievements earned from those goals."""
+    headers = {"Authorization": "Bearer test-user-durable-ach"}
+
+    # Plant and complete goal
+    g_res = await async_client.post(
+        "/api/v1/goals", json={"title": "First Seed for Achievement"}, headers=headers
+    )
+    goal_id = g_res.json()["id"]
+
+    # Complete goal to earn milestone
+    await async_client.patch(f"/api/v1/goals/{goal_id}/complete", headers=headers)
+
+    # Verify achievement exists
+    ach_res = await async_client.get("/api/v1/achievements", headers=headers)
+    assert ach_res.status_code == 200
+    ach_items = ach_res.json()["items"]
+    assert len(ach_items) > 0
+    first_ach_id = ach_items[0]["id"]
+
+    # Now bulk delete the goal
+    del_res = await async_client.request(
+        "DELETE",
+        "/api/v1/goals/bulk",
+        json={"goal_ids": [goal_id]},
+        headers=headers,
+    )
+    assert del_res.status_code == 200
+    assert del_res.json()["deleted_count"] == 1
+
+    # Goal is gone
+    assert (await async_client.get(f"/api/v1/goals/{goal_id}", headers=headers)).status_code == 404
+
+    # Achievement MUST STILL EXIST (durability preserved!)
+    ach_res_after = await async_client.get("/api/v1/achievements", headers=headers)
+    assert ach_res_after.status_code == 200
+    remaining_ach_ids = [a["id"] for a in ach_res_after.json()["items"]]
+    assert first_ach_id in remaining_ach_ids
+
+
+@pytest.mark.asyncio
+async def test_list_user_reminders_batch(async_client: AsyncClient):
+    """GET /api/v1/goals/reminders returns all reminders for the user and enforces isolation."""
+    headers_a = {"Authorization": "Bearer test-user-rem-batch-a"}
+    headers_b = {"Authorization": "Bearer test-user-rem-batch-b"}
+
+    # Plant a goal for User A
+    g_res = await async_client.post(
+        "/api/v1/goals", json={"title": "Goal with reminder"}, headers=headers_a
+    )
+    goal_id = g_res.json()["id"]
+
+    # Create reminder for User A
+    rem_res = await async_client.post(
+        f"/api/v1/goals/{goal_id}/reminders",
+        json={"reminder_time": "19:45", "timezone": "Asia/Kolkata", "is_enabled": True},
+        headers=headers_a,
+    )
+    assert rem_res.status_code == 201
+
+    # User A batch gets reminders
+    list_res = await async_client.get("/api/v1/goals/reminders", headers=headers_a)
+    assert list_res.status_code == 200
+    items = list_res.json()["items"]
+    assert len(items) >= 1
+    assert any(r["goal_id"] == goal_id and r["reminder_time"] == "19:45" for r in items)
+
+    # User B batch gets reminders -> 0 reminders for User B
+    b_res = await async_client.get("/api/v1/goals/reminders", headers=headers_b)
+    assert b_res.status_code == 200
+    assert not any(r["goal_id"] == goal_id for r in b_res.json()["items"])
+
+

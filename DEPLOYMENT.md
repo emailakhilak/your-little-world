@@ -51,8 +51,9 @@ Supabase provides two connection types in **Project Settings -> Database -> Conn
 Found in **Project Settings -> API -> JWT Settings**:
 - `SUPABASE_URL`: `https://[project-ref].supabase.co`
 - `SUPABASE_ANON_KEY`: Public anon key for client-side authentication.
-- `SUPABASE_JWT_SECRET`: Shared secret used for verifying `HS256` signatures (default).
-- `SUPABASE_JWT_ALGORITHM`: `HS256` (default) or `RS256`/`ES256` (for asymmetric key pairs via JWKS).
+- `SUPABASE_JWT_ALGORITHM`: `ES256` (Supabase ECC/P-256 asymmetric signing via JWKS), `RS256`, or `HS256` (legacy symmetric shared secret).
+- `SUPABASE_JWKS_URL`: `https://[project-ref].supabase.co/auth/v1/.well-known/jwks.json` (asymmetric JWKS verification endpoint).
+- `SUPABASE_JWT_SECRET`: Shared secret used for verifying `HS256` signatures (only needed if using legacy `HS256`).
 
 ---
 

@@ -174,6 +174,7 @@ async def test_production_unconfigured_secret_returns_500():
     """When running in production without SUPABASE_JWT_SECRET, auth requests fail with 500."""
     with (
         patch.object(settings, "ENVIRONMENT", "production"),
+        patch.object(settings, "SUPABASE_JWT_ALGORITHM", "HS256"),
         patch.object(settings, "SUPABASE_JWT_SECRET", ""),
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -347,16 +348,23 @@ def test_connect_args_and_pooler_handling():
 
 
 def test_settings_production_validation():
-    """Production settings validation requires SUPABASE_JWT_SECRET."""
+    """Production settings validation requires SUPABASE_JWT_SECRET for HS256."""
     # Missing secret in production raises ValidationError
     with pytest.raises(ValidationError) as exc:
-        Settings(ENVIRONMENT="production", SUPABASE_JWT_SECRET="")
+        Settings(
+            ENVIRONMENT="production",
+            SUPABASE_JWT_ALGORITHM="HS256",
+            SUPABASE_JWT_SECRET="",
+            SUPABASE_JWKS_URL="",
+        )
     assert "SUPABASE_JWT_SECRET is required" in str(exc.value)
 
     # Provided secret succeeds
     prod_settings = Settings(
         ENVIRONMENT="production",
+        SUPABASE_JWT_ALGORITHM="HS256",
         SUPABASE_JWT_SECRET="valid-prod-secret-12345",
+        SUPABASE_JWKS_URL="",
     )
     assert prod_settings.is_production is True
     assert prod_settings.is_development is False

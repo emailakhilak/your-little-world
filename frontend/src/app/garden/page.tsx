@@ -1,23 +1,30 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import ReturnButton from "@/components/ui/ReturnButton";
+import Link from "next/link";
 import GardenEmptyState from "@/components/garden/GardenEmptyState";
 import GoalCard from "@/components/garden/GoalCard";
 import GoalDeleteDialog from "@/components/garden/GoalDeleteDialog";
+import BulkGoalDeleteDialog from "@/components/garden/BulkGoalDeleteDialog";
 import GoalFormModal, { ReminderConfigData } from "@/components/garden/GoalFormModal";
-import GoalProgressRibbon from "@/components/garden/GoalProgressRibbon";
 import { AchievementSection } from "@/components/garden/AchievementSection";
+import {
+  DoodleAddIcon,
+  DoodleGardenDivider,
+  DoodleNotebookBorder,
+  DoodlePenCircle,
+} from "@/components/garden/GardenDoodles";
 import {
   Achievement,
   archiveGoal,
+  bulkDeleteGoals,
   createGoal,
   createReminder,
   deleteGoal,
   fetchAchievements,
   fetchGoalInstances,
-  fetchGoalReminders,
   fetchGoals,
+  fetchUserReminders,
   Goal,
   GoalCreateInput,
   GoalInstance,
@@ -30,6 +37,8 @@ import {
   updateReminder,
 } from "@/lib/api";
 
+type GoalPeriod = "all" | "daily" | "weekly" | "monthly" | "long_term";
+
 export default function GardenPage() {
   const [data, setData] = useState<GoalListResponse | null>(null);
   const [instances, setInstances] = useState<GoalInstance[]>([]);
@@ -39,11 +48,20 @@ export default function GardenPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filters
-  const [selectedStatus, setSelectedStatus] = useState<
-    "all" | "active" | "completed" | "archived"
-  >("all");
-  const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  // Period filter matching notebook sketch: Daily, Weekly, Monthly, Long term, All
+  const [selectedPeriod, setSelectedPeriod] = useState<GoalPeriod>("all");
+
+  // Selection & Bulk Deletion state
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isBulkDeleteDialogOpen, setIsBulkDeleteDialogOpen] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+
+  // Switch period filter and safely clear selection to prevent accidental cross-filter deletion
+  const handlePeriodChange = (period: GoalPeriod) => {
+    setSelectedPeriod(period);
+    setSelectedIds(new Set());
+  };
 
   // Modals state
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -55,39 +73,25 @@ export default function GardenPage() {
   // Load goals, recurring instances, reminders, and achievements
   useEffect(() => {
     let ignore = false;
-    const statusParam = selectedStatus !== "all" ? selectedStatus : undefined;
-    const categoryParam = selectedCategory !== "all" ? selectedCategory : undefined;
 
     Promise.all([
-      fetchGoals(statusParam, categoryParam),
+      fetchGoals(),
       fetchGoalInstances(),
       fetchAchievements(),
+      fetchUserReminders().catch(() => ({ items: [], total: 0 })),
     ])
-      .then(async ([goalsRes, instancesRes, achRes]) => {
+      .then(([goalsRes, instancesRes, achRes, remRes]) => {
         if (!ignore) {
           setData(goalsRes);
           setInstances(instancesRes.items);
           setAchievements(achRes.items);
+          const remMap: Record<string, Reminder> = {};
+          for (const rem of remRes.items) {
+            remMap[rem.goal_id] = rem;
+          }
+          setRemindersMap(remMap);
           setIsLoading(false);
           setIsLoadingAchievements(false);
-
-          // Fetch reminders for active goals
-          const remMap: Record<string, Reminder> = {};
-          await Promise.all(
-            goalsRes.items.map(async (g) => {
-              try {
-                const rRes = await fetchGoalReminders(g.id);
-                if (rRes.items.length > 0) {
-                  remMap[g.id] = rRes.items[0];
-                }
-              } catch {
-                // Ignore silent reminder fetch error
-              }
-            })
-          );
-          if (!ignore) {
-            setRemindersMap(remMap);
-          }
         }
       })
       .catch((err: unknown) => {
@@ -105,17 +109,15 @@ export default function GardenPage() {
     return () => {
       ignore = true;
     };
-  }, [selectedStatus, selectedCategory]);
+  }, []);
 
   const refreshAll = async () => {
     try {
-      const statusParam = selectedStatus !== "all" ? selectedStatus : undefined;
-      const categoryParam = selectedCategory !== "all" ? selectedCategory : undefined;
-
-      const [goalsRes, instancesRes, achRes] = await Promise.all([
-        fetchGoals(statusParam, categoryParam),
+      const [goalsRes, instancesRes, achRes, remRes] = await Promise.all([
+        fetchGoals(),
         fetchGoalInstances(),
         fetchAchievements(),
+        fetchUserReminders().catch(() => ({ items: [], total: 0 })),
       ]);
       setData(goalsRes);
       setInstances(instancesRes.items);
@@ -123,18 +125,9 @@ export default function GardenPage() {
       setIsLoadingAchievements(false);
 
       const remMap: Record<string, Reminder> = {};
-      await Promise.all(
-        goalsRes.items.map(async (g) => {
-          try {
-            const rRes = await fetchGoalReminders(g.id);
-            if (rRes.items.length > 0) {
-              remMap[g.id] = rRes.items[0];
-            }
-          } catch {
-            // Ignore
-          }
-        })
-      );
+      for (const rem of remRes.items) {
+        remMap[rem.goal_id] = rem;
+      }
       setRemindersMap(remMap);
       setError(null);
     } catch (err: unknown) {
@@ -166,6 +159,16 @@ export default function GardenPage() {
       });
     } else {
       savedGoal = await createGoal(formData as GoalCreateInput);
+      setData((prev) => {
+        if (!prev) return prev;
+        const newItems = [savedGoal, ...prev.items];
+        return {
+          ...prev,
+          items: newItems,
+          total: prev.total + 1,
+          active_count: prev.active_count + 1,
+        };
+      });
     }
 
     // Configure reminder if set
@@ -173,28 +176,55 @@ export default function GardenPage() {
       const existingReminder = remindersMap[savedGoal.id];
       if (reminderData.enabled) {
         if (existingReminder) {
-          await updateReminder(existingReminder.id, {
+          const updatedRem = await updateReminder(existingReminder.id, {
             reminder_time: reminderData.time,
             timezone: reminderData.timezone,
             is_enabled: true,
           });
+          setRemindersMap((prev) => ({ ...prev, [savedGoal.id]: updatedRem }));
         } else {
-          await createReminder(savedGoal.id, {
+          const newRem = await createReminder(savedGoal.id, {
             reminder_time: reminderData.time,
             timezone: reminderData.timezone,
             is_enabled: true,
           });
+          setRemindersMap((prev) => ({ ...prev, [savedGoal.id]: newRem }));
         }
       } else if (existingReminder) {
         await updateReminder(existingReminder.id, { is_enabled: false });
+        setRemindersMap((prev) => {
+          const next = { ...prev };
+          delete next[savedGoal.id];
+          return next;
+        });
       }
     }
 
-    await refreshAll();
+    // Non-blocking background sync for recurring instances and achievements
+    fetchGoalInstances().then((res) => setInstances(res.items)).catch(() => {});
+    fetchAchievements().then((res) => setAchievements(res.items)).catch(() => {});
   };
 
-  // Toggle complete for a one-off goal
+  // Toggle complete for a one-off goal (Optimistic with rollback)
   const handleToggleComplete = async (id: string) => {
+    const previousData = data;
+    setData((prev) => {
+      if (!prev) return prev;
+      const target = prev.items.find((item) => item.id === id);
+      if (!target) return prev;
+      const nextStatus: "active" | "completed" =
+        target.status === "completed" ? "active" : "completed";
+      const newItems = prev.items.map((item) =>
+        item.id === id ? { ...item, status: nextStatus } : item
+      );
+      return {
+        ...prev,
+        items: newItems,
+        active_count: newItems.filter((i) => i.status === "active").length,
+        completed_count: newItems.filter((i) => i.status === "completed").length,
+      };
+    });
+
     try {
       const updated = await toggleGoalComplete(id);
       setData((prev) => {
@@ -202,41 +232,59 @@ export default function GardenPage() {
         const newItems = prev.items.map((item) =>
           item.id === updated.id ? updated : item
         );
-        const activeCount = newItems.filter((i) => i.status === "active").length;
-        const completedCount = newItems.filter(
-          (i) => i.status === "completed"
-        ).length;
         return {
           ...prev,
           items: newItems,
-          active_count: activeCount,
-          completed_count: completedCount,
+          active_count: newItems.filter((i) => i.status === "active").length,
+          completed_count: newItems.filter((i) => i.status === "completed").length,
         };
       });
-      await refreshAll();
+      // Quiet background refresh of achievements only
+      fetchAchievements().then((achRes) => setAchievements(achRes.items)).catch(() => {});
     } catch (err: unknown) {
+      setData(previousData);
       const msg = err instanceof Error ? err.message : "Failed to toggle goal.";
       setError(msg);
     }
   };
 
-  // Toggle complete for a recurring instance
+  // Toggle complete for a recurring instance (Optimistic with rollback)
   const handleToggleInstanceComplete = async (instanceId: string) => {
+    const previousInstances = instances;
+    setInstances((prev) =>
+      prev.map((inst) =>
+        inst.id === instanceId
+          ? {
+              ...inst,
+              status: (inst.status === "completed" ? "active" : "completed") as "active" | "completed",
+            }
+          : inst
+      )
+    );
+
     try {
       const updatedInst = await toggleInstanceComplete(instanceId);
       setInstances((prev) =>
         prev.map((i) => (i.id === updatedInst.id ? updatedInst : i))
       );
-      await refreshAll();
+      // Quiet background refresh of achievements only
+      fetchAchievements().then((achRes) => setAchievements(achRes.items)).catch(() => {});
     } catch (err: unknown) {
+      setInstances(previousInstances);
       const msg =
         err instanceof Error ? err.message : "Failed to toggle occurrence.";
       setError(msg);
     }
   };
 
-  // Toggle reminder enable/disable
+  // Toggle reminder enable/disable (Optimistic with rollback)
   const handleToggleReminder = async (reminder: Reminder) => {
+    const prevReminder = remindersMap[reminder.goal_id];
+    setRemindersMap((prev) => ({
+      ...prev,
+      [reminder.goal_id]: { ...reminder, is_enabled: !reminder.is_enabled },
+    }));
+
     try {
       const updated = await updateReminder(reminder.id, {
         is_enabled: !reminder.is_enabled,
@@ -246,42 +294,125 @@ export default function GardenPage() {
         [updated.goal_id]: updated,
       }));
     } catch (err: unknown) {
+      if (prevReminder) {
+        setRemindersMap((prev) => ({ ...prev, [reminder.goal_id]: prevReminder }));
+      }
       const msg =
         err instanceof Error ? err.message : "Failed to update reminder.";
       setError(msg);
     }
   };
 
-  // Archive goal
+  // Archive goal (Optimistic with rollback)
   const handleArchive = async (id: string) => {
+    const previousData = data;
+    setData((prev) => {
+      if (!prev) return prev;
+      const newItems = prev.items.map((item) =>
+        item.id === id ? { ...item, status: "archived" as const, archived_at: new Date().toISOString() } : item
+      );
+      return {
+        ...prev,
+        items: newItems,
+        active_count: newItems.filter((i) => i.status === "active").length,
+        completed_count: newItems.filter((i) => i.status === "completed").length,
+        archived_count: newItems.filter((i) => i.status === "archived").length,
+      };
+    });
+
     try {
-      await archiveGoal(id);
-      await refreshAll();
+      const updated = await archiveGoal(id);
+      setData((prev) => {
+        if (!prev) return prev;
+        const newItems = prev.items.map((item) =>
+          item.id === updated.id ? updated : item
+        );
+        return {
+          ...prev,
+          items: newItems,
+          active_count: newItems.filter((i) => i.status === "active").length,
+          completed_count: newItems.filter((i) => i.status === "completed").length,
+          archived_count: newItems.filter((i) => i.status === "archived").length,
+        };
+      });
     } catch (err: unknown) {
+      setData(previousData);
       const msg = err instanceof Error ? err.message : "Failed to archive goal.";
       setError(msg);
     }
   };
 
-  // Restore goal from archive
+  // Restore goal from archive (Optimistic with rollback)
   const handleRestore = async (goal: Goal) => {
+    const previousData = data;
+    setData((prev) => {
+      if (!prev) return prev;
+      const newItems = prev.items.map((item) =>
+        item.id === goal.id ? { ...item, status: "active" as const, archived_at: null } : item
+      );
+      return {
+        ...prev,
+        items: newItems,
+        active_count: newItems.filter((i) => i.status === "active").length,
+        completed_count: newItems.filter((i) => i.status === "completed").length,
+        archived_count: newItems.filter((i) => i.status === "archived").length,
+      };
+    });
+
     try {
-      await updateGoal(goal.id, { status: "active" });
-      await refreshAll();
+      const updated = await updateGoal(goal.id, { status: "active" });
+      setData((prev) => {
+        if (!prev) return prev;
+        const newItems = prev.items.map((item) =>
+          item.id === updated.id ? updated : item
+        );
+        return {
+          ...prev,
+          items: newItems,
+          active_count: newItems.filter((i) => i.status === "active").length,
+          completed_count: newItems.filter((i) => i.status === "completed").length,
+          archived_count: newItems.filter((i) => i.status === "archived").length,
+        };
+      });
     } catch (err: unknown) {
+      setData(previousData);
       const msg = err instanceof Error ? err.message : "Failed to restore goal.";
       setError(msg);
     }
   };
 
-  // Delete confirmation
+  // Individual delete confirmation (fast local update without slow N+1 refetches)
   const confirmDelete = async () => {
     if (!deletingGoalId) return;
+    const targetId = deletingGoalId;
     setIsDeleting(true);
     try {
-      await deleteGoal(deletingGoalId);
+      await deleteGoal(targetId);
+      setData((prev) => {
+        if (!prev) return prev;
+        const newItems = prev.items.filter((item) => item.id !== targetId);
+        return {
+          ...prev,
+          items: newItems,
+          total: Math.max(0, prev.total - 1),
+          active_count: newItems.filter((i) => i.status === "active").length,
+          completed_count: newItems.filter((i) => i.status === "completed").length,
+          archived_count: newItems.filter((i) => i.status === "archived").length,
+        };
+      });
+      setInstances((prev) => prev.filter((i) => i.goal_id !== targetId));
+      setRemindersMap((prev) => {
+        const next = { ...prev };
+        delete next[targetId];
+        return next;
+      });
+      setSelectedIds((prev) => {
+        if (!prev.has(targetId)) return prev;
+        const next = new Set(prev);
+        next.delete(targetId);
+        return next;
+      });
       setDeletingGoalId(null);
-      await refreshAll();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to delete goal.";
       setError(msg);
@@ -290,151 +421,385 @@ export default function GardenPage() {
     }
   };
 
+  // Bulk delete confirmation (single API request + single DB transaction)
+  const confirmBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    const targetIds = Array.from(selectedIds);
+    setIsBulkDeleting(true);
+    try {
+      const res = await bulkDeleteGoals(targetIds);
+      const deletedSet = new Set(res.deleted_ids);
+
+      setData((prev) => {
+        if (!prev) return prev;
+        const newItems = prev.items.filter((item) => !deletedSet.has(item.id));
+        return {
+          ...prev,
+          items: newItems,
+          total: Math.max(0, prev.total - res.deleted_count),
+          active_count: newItems.filter((i) => i.status === "active").length,
+          completed_count: newItems.filter((i) => i.status === "completed").length,
+          archived_count: newItems.filter((i) => i.status === "archived").length,
+        };
+      });
+
+      setInstances((prev) => prev.filter((i) => !deletedSet.has(i.goal_id)));
+      setRemindersMap((prev) => {
+        const next = { ...prev };
+        res.deleted_ids.forEach((id) => delete next[id]);
+        return next;
+      });
+
+      setSelectedIds(new Set());
+      setIsSelectionMode(false);
+      setIsBulkDeleteDialogOpen(false);
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : "Failed to delete selected intentions.";
+      setError(msg);
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
+
   const deletingGoal = data?.items.find((i) => i.id === deletingGoalId);
 
+  // Filter goals according to the notebook period tabs
+  const filteredGoals = (data?.items || []).filter((goal) => {
+    if (selectedPeriod === "daily") {
+      return goal.recurrence_cadence === "daily" || goal.category === "habit";
+    }
+    if (selectedPeriod === "weekly") {
+      return goal.recurrence_cadence === "weekly";
+    }
+    if (selectedPeriod === "monthly") {
+      return goal.recurrence_cadence === "monthly";
+    }
+    if (selectedPeriod === "long_term") {
+      return (
+        goal.category === "aspiration" ||
+        goal.category === "milestone" ||
+        goal.recurrence_cadence === "yearly" ||
+        ((!goal.recurrence_cadence || goal.recurrence_cadence === "none") &&
+          goal.category !== "habit")
+      );
+    }
+    return true; // "all"
+  });
+
+  const visibleGoalIds = filteredGoals.map((g) => g.id);
+  const isAllVisibleSelected =
+    visibleGoalIds.length > 0 &&
+    visibleGoalIds.every((id) => selectedIds.has(id));
+
+  // Multi-select helpers
+  const handleToggleSelectGoal = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleSelectAll = () => {
+    if (isAllVisibleSelected) {
+      // Deselect all visible
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        visibleGoalIds.forEach((id) => next.delete(id));
+        return next;
+      });
+    } else {
+      // Select all visible in current filter
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        visibleGoalIds.forEach((id) => next.add(id));
+        return next;
+      });
+    }
+  };
+
+  const handleCancelSelection = () => {
+    setSelectedIds(new Set());
+    setIsSelectionMode(false);
+  };
+
+  const totalGoalsCount = data?.items.length || 0;
+  const completedGoalsCount =
+    data?.items.filter((g) => g.status === "completed").length || 0;
+
   return (
-    <main className="min-h-screen p-4 sm:p-8 md:p-12 flex flex-col items-center max-w-4xl mx-auto">
-      {/* Return navigation bar */}
-      <div className="w-full flex items-center justify-between mb-6">
-        <ReturnButton label="Return to Living Room" />
-        <span
-          aria-hidden="true"
-          className="text-xs font-doodle text-[#86A868]/60 select-none hidden sm:inline"
+    <main className="min-h-screen bg-[#0E0E10] text-[#EAE6DF] flex flex-col items-center px-4 py-8 sm:py-12 select-text font-sans">
+      {/* Discreet doodle return navigation to living room */}
+      <div className="w-full max-w-3xl flex justify-start mb-4">
+        <Link
+          href="/"
+          className="text-xs font-doodle text-[#77777D] hover:text-[#FFFFFF] transition-colors flex items-center gap-1.5 focus:outline-none focus-visible:ring-1 focus-visible:ring-[#FFFFFF] rounded-sm px-1 py-0.5"
+          aria-label="Return to The Living Room"
         >
-          ✦ garden of intentions &amp; rhythms
-        </span>
+          <span>←</span>
+          <span>living room</span>
+        </Link>
       </div>
 
-      {/* Chamber Header Card */}
-      <section className="w-full bg-[#1A1D24] border border-[#2B303C] rounded-3xl p-6 sm:p-10 shadow-2xl relative overflow-hidden text-center mb-6">
-        {/* Subtle decorative doodle mark */}
+      {/* =========================================================================
+          MAIN NOTEBOOK CONTAINER:
+          One large hand-drawn notebook page with imperfect sketched borders.
+          ========================================================================= */}
+      <div className="w-full max-w-3xl bg-[#141417] relative p-6 sm:p-10 rounded-2xl sm:rounded-3xl border border-[#2B2B32]/70 shadow-2xl flex flex-col">
+        {/* Subtle hand-drawn border overlay */}
+        <DoodleNotebookBorder />
+
+        {/* Small handwritten room identifier */}
         <div
           aria-hidden="true"
-          className="absolute top-5 right-6 text-xs font-doodle text-[#86A868]/50 select-none"
+          className="text-[11px] font-doodle text-[#55555E] select-none text-right -mt-2 mb-2"
         >
-          ✦ little seeds
+          page 2 · intentions
         </div>
 
-        {/* Botanical Pot Emblem */}
-        <div className="w-16 h-16 sm:w-20 sm:h-20 mx-auto rounded-full bg-[#202722] border border-[#86A868]/30 flex items-center justify-center text-3xl mb-4 sm:mb-5 shadow-inner">
-          🌱
-        </div>
-
-        {/* Title & Atmosphere */}
-        <span className="text-xs uppercase tracking-widest text-[#86A868] font-semibold">
-          Chamber of Intentions
-        </span>
-        <h1 className="font-serif text-3xl sm:text-4xl text-[#EAE6DF] mt-1.5 mb-3 font-medium">
-          Garden of Tomorrow
-        </h1>
-        <p className="text-[#9D978C] text-sm sm:text-base max-w-lg mx-auto leading-relaxed font-sans">
-          “A quiet plot of soil for your daily rhythms, habits, deadlines, and the
-          long-term aspirations you wish to nurture into bloom.”
-        </p>
-      </section>
-
-      {/* Error Banner if any */}
-      {error && (
-        <div
-          className="w-full mb-6 p-4 rounded-2xl bg-rose-950/40 border border-rose-800/50 flex flex-col sm:flex-row items-center justify-between gap-3 text-rose-200 text-sm font-sans"
-          role="alert"
-        >
-          <div className="flex items-center space-x-2">
-            <span>⚠️</span>
-            <span>{error}</span>
+        {/* Header:
+            🌱  The Garden of Tomorrow
+                somewhere to grow
+        */}
+        <header className="w-full flex flex-col text-left">
+          <div className="flex items-center gap-2.5">
+            <span className="text-2xl sm:text-3xl select-none" aria-hidden="true">
+              🌱
+            </span>
+            <h1 className="font-serif text-2xl sm:text-3xl text-[#EAE6DF] font-medium tracking-tight">
+              The Garden of Tomorrow
+            </h1>
           </div>
-          <button
-            onClick={() => refreshAll()}
-            className="px-3 py-1.5 rounded-xl bg-rose-900/60 border border-rose-700 hover:bg-rose-800 text-xs font-medium cursor-pointer transition-colors shrink-0"
+          <p className="font-doodle text-xs sm:text-sm text-[#77777D] ml-9 mt-0.5">
+            somewhere to grow
+          </p>
+        </header>
+
+        {/* Hand-drawn divider line */}
+        <DoodleGardenDivider className="w-full my-4" />
+
+        {/* Error notice if present */}
+        {error && (
+          <div
+            className="w-full mb-4 p-3 rounded-xl bg-rose-950/40 border border-rose-800/50 flex items-center justify-between gap-3 text-rose-200 text-xs font-sans"
+            role="alert"
           >
-            Tend Soil Again
-          </button>
-        </div>
-      )}
-
-      {/* Progress & Filter Navigation Ribbon */}
-      <GoalProgressRibbon
-        activeCount={data?.active_count || 0}
-        completedCount={data?.completed_count || 0}
-        archivedCount={data?.archived_count || 0}
-        totalCount={data?.total || 0}
-        selectedStatus={selectedStatus}
-        onSelectStatus={(status) => setSelectedStatus(status)}
-        selectedCategory={selectedCategory}
-        onSelectCategory={(cat) => setSelectedCategory(cat)}
-        onPlantSeed={() => {
-          setEditingGoal(null);
-          setIsFormOpen(true);
-        }}
-      />
-
-      {/* Main Content Area */}
-      <section className="w-full flex flex-col space-y-4" aria-label="Goals and Intentions list">
-        {/* Loading State: Cozy botanical skeletons */}
-        {isLoading && !data && (
-          <div className="w-full space-y-3 py-4" aria-live="polite">
-            {[1, 2, 3].map((n) => (
-              <div
-                key={n}
-                className="w-full bg-[#181B22]/70 border border-[#252A34] rounded-2xl p-6 flex items-start space-x-4 animate-pulse"
-              >
-                <div className="w-6 h-6 rounded-full bg-[#252B36] shrink-0" />
-                <div className="flex-1 space-y-2">
-                  <div className="h-4 bg-[#252B36] rounded w-2/5" />
-                  <div className="h-3 bg-[#1F232D] rounded w-4/5" />
-                </div>
-              </div>
-            ))}
+            <span>⚠️ {error}</span>
+            <button
+              onClick={() => refreshAll()}
+              className="px-2.5 py-1 rounded-lg border border-rose-700 bg-rose-900/60 hover:bg-rose-800 text-[11px] cursor-pointer"
+            >
+              tend again
+            </button>
           </div>
         )}
 
-        {/* Empty State */}
-        {!isLoading && data && data.items.length === 0 && (
-          <GardenEmptyState
-            filterStatus={selectedStatus}
-            onPlantSeed={() => {
+        {/* Goal Period Navigation:
+            ( Daily )   ( Weekly )   ( Monthly )   ( Long Term Goals )   ( All )
+        */}
+        <nav
+          className="w-full flex flex-wrap items-center justify-center gap-3 sm:gap-5 my-3 select-none"
+          aria-label="Goal Periods"
+        >
+          {[
+            { id: "daily", label: "Daily" },
+            { id: "weekly", label: "Weekly" },
+            { id: "monthly", label: "Monthly" },
+            { id: "long_term", label: "Long term" },
+            { id: "all", label: "All" },
+          ].map((tab) => {
+            const isActive = selectedPeriod === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => handlePeriodChange(tab.id as GoalPeriod)}
+                className={`relative px-3.5 py-1 font-doodle text-xs sm:text-sm cursor-pointer transition-colors group focus:outline-none focus-visible:ring-1 focus-visible:ring-[#FFFFFF] rounded-sm ${
+                  isActive
+                    ? "text-[#EAE6DF] font-medium"
+                    : "text-[#77777D] hover:text-[#B4B4BB]"
+                }`}
+              >
+                <DoodlePenCircle active={isActive} />
+                <span className="relative z-10 px-1">{tab.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Handwritten Quiet Progress Representation */}
+        {totalGoalsCount > 0 && (
+          <div className="w-full my-2 flex flex-col items-center justify-center text-center select-none">
+            <div className="flex items-center space-x-2 text-[#44444C] text-xs">
+              <span className="tracking-widest">───────</span>
+              <span className="text-[#8E8E93] text-xs">●</span>
+              <span className="tracking-widest">───────</span>
+            </div>
+            <span className="font-doodle text-[11px] text-[#77777D] mt-0.5">
+              {completedGoalsCount} of {totalGoalsCount} bloomed · growing
+            </span>
+          </div>
+        )}
+
+        {/* Sketched Divider */}
+        <DoodleGardenDivider className="w-full my-3" />
+
+        {/* Goals Checklist Area */}
+        <section
+          className="w-full flex flex-col my-2 min-h-[140px]"
+          aria-label="Intentions list"
+        >
+          {/* Loading State: Quiet handwritten note */}
+          {isLoading && !data && (
+            <div className="py-12 text-center font-doodle text-xs text-[#77777D] animate-pulse">
+              opening notebook pages...
+            </div>
+          )}
+
+          {/* Empty State */}
+          {!isLoading && data && filteredGoals.length === 0 && (
+            <GardenEmptyState
+              filterStatus={selectedPeriod}
+              onPlantSeed={() => {
+                setEditingGoal(null);
+                setIsFormOpen(true);
+              }}
+            />
+          )}
+
+          {/* Subtle Select Toggle or Selection Action Row */}
+          {!isLoading && filteredGoals.length > 0 && (
+            <div className="w-full mb-3">
+              {!isSelectionMode ? (
+                <div className="w-full flex items-center justify-between px-1 py-0.5">
+                  <span className="font-doodle text-[11px] text-[#55555E]">
+                    {filteredGoals.length}{" "}
+                    {filteredGoals.length === 1 ? "intention" : "intentions"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsSelectionMode(true)}
+                    className="font-doodle text-xs text-[#77777D] hover:text-[#EAE6DF] transition-colors cursor-pointer px-2 py-0.5 rounded-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-[#FFFFFF]"
+                    aria-label="Enter selection mode"
+                  >
+                    <span>[ </span>
+                    <span className="underline decoration-dotted underline-offset-4">
+                      Select
+                    </span>
+                    <span> ]</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="w-full py-2 px-3 rounded-xl border border-[#2B2B32]/90 bg-[#121216] flex flex-wrap items-center justify-between gap-2.5 font-doodle text-xs text-[#8E8E93] select-none">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[#EAE6DF] font-medium">
+                      {selectedIds.size} selected
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={handleToggleSelectAll}
+                      className="text-[#8E8E93] hover:text-[#EAE6DF] transition-colors cursor-pointer px-1.5 py-0.5 rounded-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-[#FFFFFF]"
+                    >
+                      [ {isAllVisibleSelected ? "Deselect All" : "Select All"} ]
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsBulkDeleteDialogOpen(true)}
+                      disabled={selectedIds.size === 0}
+                      className={`transition-colors cursor-pointer px-1.5 py-0.5 rounded-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-rose-400 ${
+                        selectedIds.size > 0
+                          ? "text-rose-400 hover:text-rose-300 font-medium"
+                          : "text-[#55555E] cursor-not-allowed opacity-40"
+                      }`}
+                    >
+                      [ Delete Selected ]
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleCancelSelection}
+                      className="text-[#8E8E93] hover:text-[#EAE6DF] transition-colors cursor-pointer px-1.5 py-0.5 rounded-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-[#FFFFFF]"
+                    >
+                      [ Cancel ]
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Checklist Items */}
+          {!isLoading &&
+            filteredGoals.length > 0 &&
+            filteredGoals.map((goal) => {
+              const goalInstances = instances.filter((i) => i.goal_id === goal.id);
+              const currentInst = goalInstances.length > 0 ? goalInstances[0] : null;
+              const reminder = remindersMap[goal.id] || null;
+
+              return (
+                <GoalCard
+                  key={goal.id}
+                  goal={goal}
+                  currentInstance={currentInst}
+                  reminder={reminder}
+                  onToggleComplete={handleToggleComplete}
+                  onToggleInstanceComplete={handleToggleInstanceComplete}
+                  onToggleReminder={handleToggleReminder}
+                  onEdit={(g) => {
+                    setEditingGoal(g);
+                    setIsFormOpen(true);
+                  }}
+                  onArchive={handleArchive}
+                  onRestore={handleRestore}
+                  onDelete={(id) => setDeletingGoalId(id)}
+                  isSelectionMode={isSelectionMode}
+                  isSelected={selectedIds.has(goal.id)}
+                  onToggleSelect={handleToggleSelectGoal}
+                />
+              );
+            })}
+        </section>
+
+        {/* Add Goal Control: Hand-drawn (+)
+            From sketch:
+                          (+)
+        */}
+        <div className="w-full flex flex-col items-center justify-center mt-6 mb-4">
+          <button
+            type="button"
+            onClick={() => {
               setEditingGoal(null);
               setIsFormOpen(true);
             }}
-          />
-        )}
+            className="group flex flex-col items-center gap-1 text-[#77777D] hover:text-[#EAE6DF] transition-colors cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-[#FFFFFF] rounded-sm p-2"
+            aria-label="Add new intention"
+            title="Write new intention (+)"
+          >
+            <div className="w-8 h-8 flex items-center justify-center border border-[#3A3A42] group-hover:border-[#EAE6DF] rounded-full transition-colors">
+              <DoodleAddIcon className="w-4 h-4" />
+            </div>
+            <span className="font-doodle text-xs tracking-wider">add</span>
+          </button>
+        </div>
 
-        {/* Goals List */}
-        {!isLoading &&
-          data &&
-          data.items.length > 0 &&
-          data.items.map((goal) => {
-            // Find most recent occurrence for recurring goals
-            const goalInstances = instances.filter((i) => i.goal_id === goal.id);
-            const currentInst = goalInstances.length > 0 ? goalInstances[0] : null;
-            const reminder = remindersMap[goal.id] || null;
+        {/* Subtle divider before achievements */}
+        <DoodleGardenDivider className="w-full my-3" />
 
-            return (
-              <GoalCard
-                key={goal.id}
-                goal={goal}
-                currentInstance={currentInst}
-                reminder={reminder}
-                onToggleComplete={handleToggleComplete}
-                onToggleInstanceComplete={handleToggleInstanceComplete}
-                onToggleReminder={handleToggleReminder}
-                onEdit={(g) => {
-                  setEditingGoal(g);
-                  setIsFormOpen(true);
-                }}
-                onArchive={handleArchive}
-                onRestore={handleRestore}
-                onDelete={(id) => setDeletingGoalId(id)}
-              />
-            );
-          })}
-      </section>
-
-      {/* Garden Keepsakes / Milestones */}
-      <AchievementSection
-        achievements={achievements}
-        isLoading={isLoadingAchievements}
-      />
+        {/* Achievements / Milestones */}
+        <AchievementSection
+          achievements={achievements}
+          isLoading={isLoadingAchievements}
+        />
+      </div>
 
       {/* Goal Create / Edit Form Modal */}
       <GoalFormModal
@@ -443,9 +808,10 @@ export default function GardenPage() {
         onSubmit={handleFormSubmit}
         initialGoal={editingGoal}
         initialReminder={editingGoal ? remindersMap[editingGoal.id] : null}
+        targetPeriod={selectedPeriod}
       />
 
-      {/* Delete Confirmation Dialog */}
+      {/* Individual Delete Confirmation Dialog */}
       <GoalDeleteDialog
         isOpen={Boolean(deletingGoalId)}
         goalTitle={deletingGoal?.title || "this seed"}
@@ -454,13 +820,20 @@ export default function GardenPage() {
         isDeleting={isDeleting}
       />
 
+      {/* Bulk Delete Confirmation Dialog */}
+      <BulkGoalDeleteDialog
+        isOpen={isBulkDeleteDialogOpen}
+        count={selectedIds.size}
+        onConfirm={confirmBulkDelete}
+        onCancel={() => setIsBulkDeleteDialogOpen(false)}
+        isDeleting={isBulkDeleting}
+      />
+
       {/* Atmospheric Footer Seal */}
-      <footer className="mt-12 text-center text-xs text-[#8C7A6B] flex items-center justify-center space-x-3 select-none pb-6">
-        <span className="font-serif italic">Garden of Tomorrow</span>
-        <span>•</span>
-        <span className="font-doodle text-sm text-[#86A868]/70">
-          tend gently each day
-        </span>
+      <footer className="mt-8 text-center text-xs text-[#55555E] flex items-center justify-center space-x-2 select-none font-doodle pb-4">
+        <span>~</span>
+        <span>somewhere to grow</span>
+        <span>~</span>
       </footer>
     </main>
   );

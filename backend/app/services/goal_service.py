@@ -6,7 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.goal import Goal
 from app.repositories.goal_repository import GoalRepository
-from app.schemas.goal import GoalCreate, GoalListResponse, GoalResponse, GoalUpdate
+from app.schemas.goal import (
+    GoalBulkDeleteResponse,
+    GoalCreate,
+    GoalListResponse,
+    GoalResponse,
+    GoalUpdate,
+)
 from app.services.achievement_service import AchievementService
 
 
@@ -126,3 +132,18 @@ class GoalService:
         """Permanently remove a goal."""
         goal = await self.get_goal_or_404(db, goal_id, user_id)
         await self.repository.delete(db, goal)
+
+    async def bulk_delete_goals(
+        self, db: AsyncSession, user_id: str, goal_ids: list[str]
+    ) -> GoalBulkDeleteResponse:
+        """
+        Permanently remove multiple goals in a single atomic transaction.
+        Enforces strict user isolation: only goals owned by user_id are deleted.
+        Durable achievements already earned from completed goals are preserved.
+        """
+        if not goal_ids:
+            return GoalBulkDeleteResponse(deleted_count=0, deleted_ids=[])
+
+        deleted_ids = await self.repository.bulk_delete(db, user_id=user_id, goal_ids=goal_ids)
+        return GoalBulkDeleteResponse(deleted_count=len(deleted_ids), deleted_ids=deleted_ids)
+

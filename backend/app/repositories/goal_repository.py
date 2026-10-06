@@ -1,10 +1,13 @@
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.goal import Goal
+from app.models.goal_instance import GoalInstance
+from app.models.reminder import Reminder
 from app.schemas.goal import GoalCreate
 
 
@@ -80,5 +83,43 @@ class GoalRepository:
 
     async def delete(self, db: AsyncSession, goal: Goal) -> None:
         """Permanently delete a goal from the database."""
+        await db.execute(sa_delete(GoalInstance).where(GoalInstance.goal_id == goal.id))
+        await db.execute(sa_delete(Reminder).where(Reminder.goal_id == goal.id))
         await db.delete(goal)
         await db.commit()
+
+    async def bulk_delete(
+        self, db: AsyncSession, user_id: str, goal_ids: list[str]
+    ) -> list[str]:
+        """
+        Permanently delete multiple goals belonging strictly to user_id in one transaction.
+        Validates ownership, deletes dependent records and goals atomically, and commits once.
+        Returns the list of deleted goal IDs.
+        """
+        if not goal_ids:
+            return []
+
+        # Find which of the requested goal_ids actually belong to user_id (ownership verification)
+        query = select(Goal.id).where(Goal.id.in_(goal_ids), Goal.user_id == user_id)
+        result = await db.execute(query)
+        valid_goal_ids = list(result.scalars().all())
+
+        if not valid_goal_ids:
+            return []
+
+        # Delete dependent goal instances and reminders in one atomic transaction
+        await db.execute(
+            sa_delete(GoalInstance).where(GoalInstance.goal_id.in_(valid_goal_ids))
+        )
+        await db.execute(
+            sa_delete(Reminder).where(Reminder.goal_id.in_(valid_goal_ids))
+        )
+        # Delete goals
+        await db.execute(
+            sa_delete(Goal).where(Goal.id.in_(valid_goal_ids), Goal.user_id == user_id)
+        )
+        await db.commit()
+
+        return valid_goal_ids
+
+

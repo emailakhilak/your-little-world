@@ -76,6 +76,16 @@ class ReminderService:
             total=len(reminders),
         )
 
+    async def list_user_reminders(
+        self, db: AsyncSession, user_id: str
+    ) -> ReminderListResponse:
+        """List all reminders for the authenticated user in one round trip."""
+        reminders = await self.repository.list_by_user(db, user_id)
+        return ReminderListResponse(
+            items=[ReminderResponse.model_validate(r) for r in reminders],
+            total=len(reminders),
+        )
+
     async def update_reminder(
         self, db: AsyncSession, user_id: str, reminder_id: str, data: ReminderUpdate
     ) -> ReminderResponse:

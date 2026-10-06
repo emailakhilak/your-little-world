@@ -4,6 +4,7 @@ from app.models.chapter import StoryChapter
 from app.models.diary import DiaryEntry
 from app.models.goal import Goal
 from app.models.goal_instance import GoalInstance
+from app.models.ledger import LedgerEntry
 from app.models.news import (
     DailyEdition,
     DailyEditionArticle,
@@ -32,6 +33,7 @@ __all__ = [
     "ScheduledJob",
     "Note",
     "DiaryEntry",
+    "LedgerEntry",
     "Project",
     "StoryChapter",
     "UserPreference",

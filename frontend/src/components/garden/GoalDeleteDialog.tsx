@@ -1,5 +1,7 @@
 "use client";
 
+import { DoodleDeleteIcon } from "./GardenDoodles";
+
 interface GoalDeleteDialogProps {
   isOpen: boolean;
   goalTitle: string;
@@ -19,32 +21,35 @@ export default function GoalDeleteDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0A0C10]/80 backdrop-blur-xs"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0A0C10]/80 backdrop-blur-xs select-text"
       role="alertdialog"
       aria-modal="true"
       aria-labelledby="delete-dialog-title"
       aria-describedby="delete-dialog-desc"
     >
       <div
-        className="w-full max-w-sm bg-[#181B22] border border-[#3E2525] rounded-3xl p-6 shadow-2xl relative text-left"
+        className="w-full max-w-sm bg-[#141417] border border-[#2B2B32] rounded-3xl p-6 shadow-2xl relative text-left"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="w-10 h-10 rounded-full bg-rose-950/40 border border-rose-800/40 flex items-center justify-center text-lg mb-3">
-          🗑️
+        <div className="w-9 h-9 rounded-full border border-[#3E3E48] flex items-center justify-center text-[#8E8E93] mb-3">
+          <DoodleDeleteIcon className="w-4 h-4" />
         </div>
 
         <h3
           id="delete-dialog-title"
           className="font-serif text-lg text-[#EAE6DF] font-medium mb-1"
         >
-          Pull this seed from the soil?
+          Delete this intention?
         </h3>
-        <p id="delete-dialog-desc" className="text-xs text-[#9D978C] font-sans leading-relaxed mb-5">
+        <p
+          id="delete-dialog-desc"
+          className="text-xs text-[#9D978C] font-doodle leading-relaxed mb-5"
+        >
           Are you sure you want to remove{" "}
           <strong className="text-[#EAE6DF] font-medium font-serif">
             &ldquo;{goalTitle}&rdquo;
           </strong>
-          ? This will permanently delete this intention from your garden.
+          ? This cannot be undone.
         </p>
 
         <div className="flex items-center justify-end space-x-2.5">
@@ -52,17 +57,17 @@ export default function GoalDeleteDialog({
             type="button"
             onClick={onCancel}
             disabled={isDeleting}
-            className="px-3.5 py-1.5 rounded-xl border border-[#2B303C] bg-[#14161C] text-xs text-[#9D978C] hover:text-[#EAE6DF] transition-colors cursor-pointer"
+            className="px-4 py-1.5 rounded-full border border-[#2B2B32] bg-[#141417] text-xs font-doodle text-[#8E8E93] hover:text-[#EAE6DF] transition-colors cursor-pointer disabled:opacity-50"
           >
-            Keep Seed
+            Cancel
           </button>
           <button
             type="button"
             onClick={onConfirm}
             disabled={isDeleting}
-            className="px-4 py-1.5 rounded-xl bg-rose-950/80 border border-rose-700/80 text-xs font-medium text-rose-200 hover:bg-rose-900 transition-all cursor-pointer disabled:opacity-50"
+            className="px-4 py-1.5 rounded-full border border-red-900/60 bg-red-950/40 text-xs font-doodle text-rose-300 hover:text-rose-100 hover:bg-red-900/60 transition-all cursor-pointer disabled:opacity-50"
           >
-            {isDeleting ? "Pulling..." : "Pull Seed"}
+            {isDeleting ? "Deleting..." : "Delete"}
           </button>
         </div>
       </div>

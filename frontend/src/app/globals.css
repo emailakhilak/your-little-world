@@ -98,6 +98,52 @@ body {
   }
 }
 
+@keyframes candle-flicker {
+  0%, 100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 0.95;
+  }
+  25% {
+    transform: scale(1.03, 0.97) rotate(-1.5deg);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(0.97, 1.03) rotate(1deg);
+    opacity: 1;
+  }
+  75% {
+    transform: scale(1.02, 0.98) rotate(-0.5deg);
+    opacity: 0.92;
+  }
+}
+
+@keyframes leaf-flutter {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(2.5deg);
+  }
+}
+
+@keyframes bookmark-wave {
+  0%, 100% {
+    transform: skewX(0deg);
+  }
+  50% {
+    transform: skewX(2deg);
+  }
+}
+
+@keyframes breathing-gentle {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.012);
+  }
+}
+
 .animate-sway {
   animation: gentle-sway 6.5s ease-in-out infinite;
   transform-origin: bottom center;
@@ -124,6 +170,26 @@ body {
   animation: float-dust 6s ease-in-out infinite;
 }
 
+.animate-flicker {
+  animation: candle-flicker 3.5s ease-in-out infinite;
+  transform-origin: bottom center;
+}
+
+.animate-leaf {
+  animation: leaf-flutter 5s ease-in-out infinite;
+  transform-origin: bottom left;
+}
+
+.animate-bookmark {
+  animation: bookmark-wave 6s ease-in-out infinite;
+  transform-origin: top center;
+}
+
+.animate-breathe {
+  animation: breathing-gentle 7s ease-in-out infinite;
+  transform-origin: center center;
+}
+
 /* Respect user's motion preference */
 @media (prefers-reduced-motion: reduce) {
   .animate-sway,
@@ -131,7 +197,11 @@ body {
   .animate-pulse-lamp,
   .animate-twinkle,
   .animate-sparkle,
-  .animate-float {
+  .animate-float,
+  .animate-flicker,
+  .animate-leaf,
+  .animate-bookmark,
+  .animate-breathe {
     animation: none !important;
   }
 }

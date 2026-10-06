@@ -48,6 +48,12 @@ class DiaryEntry(Base, TimestampMixin):
         nullable=True,
     )
 
+    @property
+    def entry_time(self) -> str | None:
+        if self.reflection_json and isinstance(self.reflection_json, dict):
+            return self.reflection_json.get("entry_time")
+        return None
+
     __table_args__ = (
         UniqueConstraint("user_id", "entry_date", name="uq_user_diary_entry_date"),
         Index("ix_diary_entries_user_date", "user_id", "entry_date"),

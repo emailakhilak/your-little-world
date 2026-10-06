@@ -552,12 +552,17 @@ export function useDailySnapshot(): DailySnapshot {
     setMoon((prev) => ({ ...prev, status: "loading", error: null }));
     setStorybook((prev) => ({ ...prev, status: "loading", error: null }));
 
-    const tz = await loadPreferencesAndGreeting();
+    const localTz =
+      typeof Intl !== "undefined"
+        ? Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Kolkata"
+        : "Asia/Kolkata";
+
     await Promise.allSettled([
-      loadGarden(tz),
+      loadPreferencesAndGreeting(),
+      loadGarden(localTz),
       loadNews(),
       loadAttic(),
-      loadMoon(tz),
+      loadMoon(localTz),
       loadStorybook(),
     ]);
   }, [loadPreferencesAndGreeting, loadGarden, loadNews, loadAttic, loadMoon, loadStorybook]);
@@ -566,29 +571,35 @@ export function useDailySnapshot(): DailySnapshot {
     let ignore = false;
 
     async function initialize() {
-      let tz = "Asia/Kolkata";
-      let dispName: string | null = null;
-      try {
-        const prefs = await fetchUserPreferences();
-        if (!ignore) {
-          setPreferences(prefs);
-          if (prefs.timezone) tz = prefs.timezone;
-          if (prefs.display_name) dispName = prefs.display_name;
-          setGreeting(computeGreetingDetails(tz, dispName));
-        }
-      } catch {
-        // Fallback
-      }
+      const localTz =
+        typeof Intl !== "undefined"
+          ? Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Kolkata"
+          : "Asia/Kolkata";
 
-      if (!ignore) {
-        await Promise.allSettled([
-          loadGarden(tz),
-          loadNews(),
-          loadAttic(),
-          loadMoon(tz),
-          loadStorybook(),
-        ]);
-      }
+      const prefPromise = fetchUserPreferences()
+        .then((prefs) => {
+          if (!ignore) {
+            setPreferences(prefs);
+            const tz = prefs.timezone || localTz;
+            setGreeting(computeGreetingDetails(tz, prefs.display_name));
+          }
+        })
+        .catch(() => {
+          // Fallback to local timezone greeting
+          if (!ignore) {
+            setGreeting(computeGreetingDetails(localTz, null));
+          }
+        });
+
+      const roomsPromise = Promise.allSettled([
+        loadGarden(localTz),
+        loadNews(),
+        loadAttic(),
+        loadMoon(localTz),
+        loadStorybook(),
+      ]);
+
+      await Promise.allSettled([prefPromise, roomsPromise]);
     }
 
     void initialize();

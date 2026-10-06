@@ -6,6 +6,7 @@ from app.api.v1.endpoints import (
     diary,
     goals,
     health,
+    ledger,
     news,
     notes,
     settings,
@@ -21,5 +22,6 @@ api_v1_router.include_router(achievements.router, prefix="/achievements", tags=[
 api_v1_router.include_router(news.router, prefix="/news", tags=["News"])
 api_v1_router.include_router(notes.router, prefix="/notes", tags=["Notes"])
 api_v1_router.include_router(diary.router, prefix="/diary", tags=["Diary"])
+api_v1_router.include_router(ledger.router, prefix="/ledger", tags=["Ledger"])
 api_v1_router.include_router(storybook.router)
 api_v1_router.include_router(settings.router)

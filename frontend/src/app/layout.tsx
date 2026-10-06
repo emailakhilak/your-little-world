@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Caveat, Geist, Lora } from "next/font/google";
 import "./globals.css";
+import { AuthProvider } from "@/lib/auth-context";
+import AuthGuard from "@/components/auth/AuthGuard";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -35,7 +37,9 @@ export default function RootLayout({
       className={`${geistSans.variable} ${loraSerif.variable} ${caveatHand.variable} h-full antialiased dark`}
     >
       <body className="min-h-full flex flex-col font-sans bg-[#13151A] text-[#EAE6DF]">
-        {children}
+        <AuthProvider>
+          <AuthGuard>{children}</AuthGuard>
+        </AuthProvider>
       </body>
     </html>
   );

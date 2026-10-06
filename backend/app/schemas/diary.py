@@ -9,12 +9,14 @@ class DiaryEntryCreateInput(BaseModel):
     title: str | None = Field(default=None, max_length=300)
     content: str = Field(..., min_length=1)
     mood: str | None = Field(default=None, max_length=50)
+    entry_time: str | None = Field(default=None, max_length=50)
 
 
 class DiaryEntryUpdateInput(BaseModel):
     title: str | None = Field(default=None, max_length=300)
     content: str | None = Field(default=None, min_length=1)
     mood: str | None = Field(default=None, max_length=50)
+    entry_time: str | None = Field(default=None, max_length=50)
 
 
 class DiaryReflectionResponse(BaseModel):
@@ -32,6 +34,7 @@ class DiaryEntryResponse(BaseModel):
     title: str | None = None
     content: str
     mood: str | None = None
+    entry_time: str | None = None
     reflection_json: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime

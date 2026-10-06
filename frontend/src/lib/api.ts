@@ -49,6 +49,11 @@ export interface GoalListResponse {
   archived_count: number;
 }
 
+export interface GoalBulkDeleteResponse {
+  deleted_count: number;
+  deleted_ids: string[];
+}
+
 export interface GoalCreateInput {
   title: string;
   description?: string | null;
@@ -156,16 +161,39 @@ export function normalizeApiBaseUrl(rawUrl?: string): string {
 
 const API_BASE_URL = normalizeApiBaseUrl();
 
+let cachedAccessToken: string | null = null;
+let isAuthListenerAttached = false;
+
+export function setCachedAuthToken(token: string | null): void {
+  cachedAccessToken = token;
+}
+
 /**
  * Retrieves the current authentication bearer token.
  * Defaults to Supabase session token, with local persistent fallback in dev mode.
  */
 export async function getAuthToken(): Promise<string> {
+  if (cachedAccessToken) {
+    return cachedAccessToken;
+  }
+
   const supabase = getSupabaseClient();
   if (supabase) {
+    if (!isAuthListenerAttached) {
+      isAuthListenerAttached = true;
+      try {
+        supabase.auth.onAuthStateChange((_event, session) => {
+          cachedAccessToken = session?.access_token ?? null;
+        });
+      } catch {
+        // Ignore listener error
+      }
+    }
+
     try {
       const { data } = await supabase.auth.getSession();
       if (data?.session?.access_token) {
+        cachedAccessToken = data.session.access_token;
         return data.session.access_token;
       }
     } catch {
@@ -401,6 +429,33 @@ export async function deleteGoal(id: string): Promise<void> {
 }
 
 /**
+ * Permanently bulk delete multiple goals in a single request and transaction.
+ */
+export async function bulkDeleteGoals(
+  goalIds: string[]
+): Promise<GoalBulkDeleteResponse> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/goals/bulk`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ goal_ids: goalIds }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(
+      err.detail || `Failed to bulk delete goals (HTTP ${res.status})`
+    );
+  }
+
+  return res.json();
+}
+
+/**
  * Fetch goal instances (occurrences) with optional filters.
  */
 export async function fetchGoalInstances(
@@ -452,6 +507,27 @@ export async function toggleInstanceComplete(
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || `Failed to toggle occurrence (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Fetch all reminders for the authenticated user in a single request.
+ */
+export async function fetchUserReminders(): Promise<ReminderListResponse> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/goals/reminders`, {
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch reminders (HTTP ${res.status})`);
   }
 
   return res.json();
@@ -1086,7 +1162,10 @@ export async function deleteNote(noteId: string): Promise<void> {
   }
 }
 
-export async function togglePinNote(noteId: string): Promise<Note> {
+export async function togglePinNote(noteId: string, pinned?: boolean): Promise<Note> {
+  if (pinned !== undefined) {
+    return updateNote(noteId, { is_pinned: pinned });
+  }
   const token = await getAuthToken();
   const res = await fetch(`${API_BASE_URL}/notes/${noteId}/pin`, {
     method: "POST",
@@ -1098,13 +1177,16 @@ export async function togglePinNote(noteId: string): Promise<Note> {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `Failed to pin note (HTTP ${res.status})`);
+    throw new Error(err.detail || `Failed to update note pin state (HTTP ${res.status})`);
   }
 
   return res.json();
 }
 
-export async function toggleArchiveNote(noteId: string): Promise<Note> {
+export async function toggleArchiveNote(noteId: string, archived?: boolean): Promise<Note> {
+  if (archived !== undefined) {
+    return updateNote(noteId, { is_archived: archived });
+  }
   const token = await getAuthToken();
   const res = await fetch(`${API_BASE_URL}/notes/${noteId}/archive`, {
     method: "POST",
@@ -1116,7 +1198,7 @@ export async function toggleArchiveNote(noteId: string): Promise<Note> {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `Failed to archive note (HTTP ${res.status})`);
+    throw new Error(err.detail || `Failed to update note archive state (HTTP ${res.status})`);
   }
 
   return res.json();
@@ -1153,6 +1235,7 @@ export interface DiaryEntry {
   title: string | null;
   content: string;
   mood: string | null;
+  entry_time?: string | null;
   tags: string[];
   word_count: number;
   created_at: string;
@@ -1169,6 +1252,7 @@ export interface DiaryUpsertInput {
   title?: string | null;
   content: string;
   mood?: string | null;
+  entry_time?: string | null;
   tags?: string[];
 }
 
@@ -1642,6 +1726,168 @@ export async function updateUserPreferences(data: UserPreferencesUpdateInput): P
   return res.json();
 }
 
+/* =========================================================================
+   THE LITTLE LEDGER (Money Diary)
+   ========================================================================= */
 
+export interface LedgerEntry {
+  id: string;
+  user_id: string;
+  entry_date: string; // YYYY-MM-DD
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
 
+export interface LedgerEntryCreateInput {
+  entry_date: string;
+  content: string;
+}
 
+export interface LedgerEntryUpdateInput {
+  content: string;
+}
+
+export interface LedgerEntryListResponse {
+  items: LedgerEntry[];
+  total: number;
+}
+
+/**
+ * Fetch recent money diary entries for The Little Ledger.
+ */
+export async function fetchLedgerEntries(params?: {
+  limit?: number;
+  offset?: number;
+}): Promise<LedgerEntryListResponse> {
+  const token = await getAuthToken();
+  const searchParams = new URLSearchParams();
+  if (params?.limit !== undefined) searchParams.append("limit", String(params.limit));
+  if (params?.offset !== undefined) searchParams.append("offset", String(params.offset));
+
+  const url = `${API_BASE_URL}/ledger/entries${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
+  const res = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch ledger entries (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Get a ledger entry by specific calendar date (YYYY-MM-DD), or null if none exists.
+ */
+export async function fetchLedgerEntryByDate(
+  entryDate: string
+): Promise<LedgerEntry | null> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/ledger/entries/by-date/${entryDate}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch ledger entry for ${entryDate} (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Get a specific ledger entry by its unique ID.
+ */
+export async function fetchLedgerEntryById(id: string): Promise<LedgerEntry> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/ledger/entries/${id}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to fetch ledger entry (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Create or save a money diary note for a calendar date.
+ */
+export async function createLedgerEntry(
+  data: LedgerEntryCreateInput
+): Promise<LedgerEntry> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/ledger/entries`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to save ledger entry (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Update an existing money diary note.
+ */
+export async function updateLedgerEntry(
+  id: string,
+  data: LedgerEntryUpdateInput
+): Promise<LedgerEntry> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/ledger/entries/${id}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to update ledger entry (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Delete a money diary note.
+ */
+export async function deleteLedgerEntry(id: string): Promise<void> {
+  const token = await getAuthToken();
+  const res = await fetch(`${API_BASE_URL}/ledger/entries/${id}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to delete ledger entry (HTTP ${res.status})`);
+  }
+}
